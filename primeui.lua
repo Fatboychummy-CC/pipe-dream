@@ -99,7 +99,8 @@ end
 ---@param bgColor color|nil The color of the background (defaults to black)
 ---@param startIndex number|nil The index of the entry to start on
 ---@param startScroll number|nil The index of the entry to set the scroll to
-function PrimeUI.selectionBox(win, x, y, width, height, entries, action, selectChangeAction, fgColor, bgColor, startIndex, startScroll)
+---@param disabled boolean|nil Whether the selection box is disabled
+function PrimeUI.selectionBox(win, x, y, width, height, entries, action, selectChangeAction, fgColor, bgColor, startIndex, startScroll, disabled)
     expect(1, win, "table")
     expect(2, x, "number")
     expect(3, y, "number")
@@ -154,35 +155,38 @@ function PrimeUI.selectionBox(win, x, y, width, height, entries, action, selectC
     end
     -- Draw first screen.
     drawEntries()
-    -- Add a task for selection keys.
-    PrimeUI.addTask(function()
-        while true do
-            local _, key = os.pullEvent("key")
-            if key == keys.down and selection < #entries then
-                -- Move selection down.
-                selection = selection + 1
-                if selection > scroll + height - 1 then scroll = scroll + 1 end
-                -- Send action if necessary.
-                if type(selectChangeAction) == "string" then PrimeUI.resolve("selectionBox", selectChangeAction, selection)
-                elseif selectChangeAction then selectChangeAction(selection) end
-                -- Redraw screen.
-                drawEntries()
-            elseif key == keys.up and selection > 1 then
-                -- Move selection up.
-                selection = selection - 1
-                if selection < scroll then scroll = scroll - 1 end
-                -- Send action if necessary.
-                if type(selectChangeAction) == "string" then PrimeUI.resolve("selectionBox", selectChangeAction, selection)
-                elseif selectChangeAction then selectChangeAction(selection) end
-                -- Redraw screen.
-                drawEntries()
-            elseif key == keys.enter then
-                -- Select the entry: send the action.
-                if type(action) == "string" then PrimeUI.resolve("selectionBox", action, entries[selection], selection, scroll)
-                else action(entries[selection]) end
+
+    if not disabled then
+        -- Add a task for selection keys.
+        PrimeUI.addTask(function()
+            while true do
+                local _, key = os.pullEvent("key")
+                if key == keys.down and selection < #entries then
+                    -- Move selection down.
+                    selection = selection + 1
+                    if selection > scroll + height - 1 then scroll = scroll + 1 end
+                    -- Send action if necessary.
+                    if type(selectChangeAction) == "string" then PrimeUI.resolve("selectionBox", selectChangeAction, selection)
+                    elseif selectChangeAction then selectChangeAction(selection, scroll) end
+                    -- Redraw screen.
+                    drawEntries()
+                elseif key == keys.up and selection > 1 then
+                    -- Move selection up.
+                    selection = selection - 1
+                    if selection < scroll then scroll = scroll - 1 end
+                    -- Send action if necessary.
+                    if type(selectChangeAction) == "string" then PrimeUI.resolve("selectionBox", selectChangeAction, selection)
+                    elseif selectChangeAction then selectChangeAction(selection, scroll) end
+                    -- Redraw screen.
+                    drawEntries()
+                elseif key == keys.enter then
+                    -- Select the entry: send the action.
+                    if type(action) == "string" then PrimeUI.resolve("selectionBox", action, entries[selection], selection, scroll)
+                    else action(selection, scroll) end
+                end
             end
-        end
-    end)
+        end)
+    end
 end
 
 --- Draws a thin border around a screen region.
