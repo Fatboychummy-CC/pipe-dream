@@ -97,7 +97,9 @@ end
 ---@param selectChangeAction function|string|nil A function or `run` event that's called when the current selection is changed
 ---@param fgColor color|nil The color of the text (defaults to white)
 ---@param bgColor color|nil The color of the background (defaults to black)
-function PrimeUI.selectionBox(win, x, y, width, height, entries, action, selectChangeAction, fgColor, bgColor)
+---@param startIndex number|nil The index of the entry to start on
+---@param startScroll number|nil The index of the entry to set the scroll to
+function PrimeUI.selectionBox(win, x, y, width, height, entries, action, selectChangeAction, fgColor, bgColor, startIndex, startScroll)
     expect(1, win, "table")
     expect(2, x, "number")
     expect(3, y, "number")
@@ -108,6 +110,8 @@ function PrimeUI.selectionBox(win, x, y, width, height, entries, action, selectC
     expect(8, selectChangeAction, "function", "string", "nil")
     fgColor = expect(9, fgColor, "number", "nil") or colors.white
     bgColor = expect(10, bgColor, "number", "nil") or colors.black
+    startIndex = expect(11, startIndex, "number", "nil") or 1
+    startScroll = expect(12, startScroll, "number", "nil") or 1
     -- Check that all entries are strings.
     if #entries == 0 then error("bad argument #6 (table must not be empty)", 2) end
     for i, v in ipairs(entries) do
@@ -115,7 +119,7 @@ function PrimeUI.selectionBox(win, x, y, width, height, entries, action, selectC
     end
     -- Create container window.
     local entrywin = window.create(win, x, y, width - 1, height)
-    local selection, scroll = 1, 1
+    local selection, scroll = startIndex, startScroll
     -- Create a function to redraw the entries on screen.
     local function drawEntries()
         -- Clear and set invisible for performance.
@@ -174,7 +178,7 @@ function PrimeUI.selectionBox(win, x, y, width, height, entries, action, selectC
                 drawEntries()
             elseif key == keys.enter then
                 -- Select the entry: send the action.
-                if type(action) == "string" then PrimeUI.resolve("selectionBox", action, entries[selection])
+                if type(action) == "string" then PrimeUI.resolve("selectionBox", action, entries[selection], selection, scroll)
                 else action(entries[selection]) end
             end
         end
@@ -221,6 +225,65 @@ function PrimeUI.borderBox(win, x, y, width, height, fgColor, bgColor)
   -- Draw the bottom border and corners.
   win.setCursorPos(x - 1, y + height)
   win.write("\x8D" .. ("\x8C"):rep(width) .. "\x8E")
+end
+
+--- Adds an action to trigger when a key is pressed.
+---@param key integer The key to trigger on, from `keys.*`
+---@param action function|string A function to call when clicked, or a string to use as a key for a `run` return event
+function PrimeUI.keyAction(key, action)
+  expect(1, key, "number")
+  expect(2, action, "function", "string")
+  PrimeUI.addTask(function()
+      while true do
+          local _, param1 = os.pullEvent("key") -- wait for key
+          if param1 == key then
+              if type(action) == "string" then PrimeUI.resolve("keyAction", action)
+              else action() end
+          end
+      end
+  end)
+end
+
+--- Creates a text box that wraps text and can have its text modified later.
+---@param win Window The parent window of the text box
+---@param x number The X position of the box
+---@param y number The Y position of the box
+---@param width number The width of the box
+---@param height number The height of the box
+---@param text string The initial text to draw
+---@param fgColor color|nil The color of the text (defaults to white)
+---@param bgColor color|nil The color of the background (defaults to black)
+---@return function redraw A function to redraw the window with new contents
+function PrimeUI.textBox(win, x, y, width, height, text, fgColor, bgColor)
+  expect(1, win, "table")
+  expect(2, x, "number")
+  expect(3, y, "number")
+  expect(4, width, "number")
+  expect(5, height, "number")
+  expect(6, text, "string")
+  fgColor = expect(7, fgColor, "number", "nil") or colors.white
+  bgColor = expect(8, bgColor, "number", "nil") or colors.black
+  -- Create the box window.
+  local box = window.create(win, x, y, width, height)
+  -- Override box.getSize to make print not scroll.
+  function box.getSize() ---@diagnostic disable-line
+      return width, math.huge
+  end
+  -- Define a function to redraw with.
+  local function redraw(_text)
+      expect(1, _text, "string")
+      -- Set window parameters.
+      box.setBackgroundColor(bgColor)
+      box.setTextColor(fgColor)
+      box.clear()
+      box.setCursorPos(1, 1)
+      -- Redirect and draw with `print`.
+      local old = term.redirect(box)
+      print(_text)
+      term.redirect(old)
+  end
+  redraw(text)
+  return redraw
 end
 
 return PrimeUI
