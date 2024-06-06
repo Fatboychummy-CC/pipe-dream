@@ -69,13 +69,14 @@ end
 ---@param title string The title of the box.
 ---@param desc string The description of the box.
 ---@param height integer The height of the box.
-local function info_box(win, title, desc, height)
+---@param override_title_color integer? The color of the title text.
+local function info_box(win, title, desc, height, override_title_color)
   local width = win.getSize()
   width = width - 4
 
   -- Info box with border
   PrimeUI.borderBox(win, 3, 3, width, height)
-  PrimeUI.textBox(win, 3, 2, #title + 2, 1, ' ' .. title .. ' ', colors.purple)
+  PrimeUI.textBox(win, 3, 2, #title + 2, 1, ' ' .. title .. ' ', override_title_color or colors.purple)
   PrimeUI.textBox(win, 3, 3, width, height, desc, colors.lightGray)
 end
 
@@ -149,6 +150,28 @@ local function get_peripherals()
   end
 
   return peripherals
+end
+
+--- Display the unacceptable input screen.
+---@param _type "error"|"input"|string The type of error.
+---@param reason string The reason for the error.
+local function unacceptable(_type, reason)
+  local win = window.create(term.current(), 1, 1, term.getSize())
+
+  PrimeUI.clear()
+
+  -- Draw info box.
+  if _type == "error" then
+    info_box(win, "Error", ("An error occurred.\n%s\n\nPress enter to continue."):format(reason), 10, colors.red)
+  elseif _type == "input" then
+    info_box(win, "Input Error", ("The last user input was unacceptable.\n%s\n\nPress enter to continue."):format(reason), 4, colors.red)
+  else
+    info_box(win, "Unknown Error", ("An unknown error occurred.\n%s\n\nPress enter to continue."):format(reason), 10, colors.red)
+  end
+
+  PrimeUI.keyAction(keys.enter, "exit")
+
+  PrimeUI.run()
 end
 
 --- Connections menu
@@ -308,7 +331,47 @@ local function list_menu()
 end
 
 local function tickrate_menu()
+  --[[
+    ######################################################
+    # Update Rate                                        #
+    # Press enter to accept the update rate and exit.    #
+    ######################################################
+    ######################################################
+    # Updates every [  10] ticks                         #
+    ######################################################
+  ]]
 
+  local win = window.create(term.current(), 1, 1, term.getSize())
+  local width, height = win.getSize()
+
+  PrimeUI.clear()
+
+  -- Draw info box.
+  info_box(win, "Update Rate", "Press enter to accept the new update rate and exit.", 2)
+
+  -- Draw the input box.
+  -- First the text around the input box.
+  PrimeUI.textBox(win, 3, 8, width - 4, 1, "Updates every [        ] ticks.", colors.white)
+
+  -- And the outline
+  PrimeUI.borderBox(win, 3, 8, width - 4, 1, colors.white, colors.black)
+
+  -- Then the input box itself.
+  local tickrate = tostring(update_tickrate)
+  PrimeUI.inputBox(win, 18, 8, 8, "tickrate", colors.white, colors.black, nil, nil, nil, tickrate)
+
+  local object, event, output = PrimeUI.run()
+
+  if object == "inputBox" then
+    if event == "tickrate" then
+      local value = tonumber(output)
+      if not value then
+        unacceptable("input", "The input must be a number.")
+      else
+        update_tickrate = value
+      end
+    end
+  end
 end
 
 local function nickname_menu()
@@ -469,6 +532,9 @@ end
 while true do
   local ok, result = pcall(main_menu)
   if not ok then
+    ---@diagnostic disable-next-line ITS A HEKKIN STRING
+    unacceptable("error", result)
+
     print() -- put the cursor back on the screen
     error(result, 0)
     break
