@@ -93,12 +93,62 @@ end
 ---@param initial_index integer The index of the item to select initially.
 ---@param initial_scroll integer The index of the item to scroll to initially.
 ---@param disabled boolean? Whether the box is disabled (displayed, but not interactable).
-local function outlined_selection_box(win, x, y, width, height, items, action, select_change_action, fg_color, bg_color, initial_index, initial_scroll, disabled)
+local function outlined_selection_box(win, x, y, width, height, items, action, select_change_action, fg_color, bg_color,
+                                      initial_index, initial_scroll, disabled)
   -- Selection box with border
   PrimeUI.borderBox(win, x, y, width, height, fg_color, bg_color)
 
   -- Draw the items
-  PrimeUI.selectionBox(win, x, y, width + 1, height, items, action, select_change_action, fg_color, bg_color, initial_index, initial_scroll, disabled)
+  return PrimeUI.selectionBox(win, x, y, width + 1, height, items, action, select_change_action, fg_color, bg_color,
+    initial_index, initial_scroll, disabled)
+end
+
+--- Create an outlined input box.
+---@param win Window The window to draw the box on.
+---@param x integer The x position of the box.
+---@param y integer The y position of the box.
+---@param width integer The width of the box.
+---@param action string|fun(text: string) The action to perform when the input is submitted.
+---@param fg_color integer The color of the text.
+---@param bg_color integer The color of the background.
+---@param replacement string? The replacement character for the input.
+---@param history string[]? The history of inputs.
+---@param completion_func nil|fun(text: string): string[] The function to call for completion.
+---@param default string? The default text to display in the input box.
+---@param disabled boolean? Whether the box is disabled (displayed, but not interactable).
+local function outlined_input_box(win, x, y, width, action, fg_color, bg_color, replacement, history, completion_func, default, disabled)
+  -- Input box with border
+  PrimeUI.borderBox(win, x, y, width, 1, fg_color, bg_color)
+
+  return PrimeUI.inputBox(win, x, y, width, action, fg_color, bg_color, replacement, history, completion_func, default, disabled)
+end
+
+--- Get all peripherals by their name
+---@return string[] peripherals The list of peripheral names.
+local function get_peripherals()
+  local peripherals = peripheral.getNames()
+
+  -- Replace names with nicknames
+  for i, v in ipairs(peripherals) do
+    peripherals[i] = v
+  end
+
+  -- Iterate through connections and add any peripherals from that list that
+  -- have been disconnected.
+  for name in pairs(connections) do
+    for i, v in ipairs(peripherals) do
+      local found = false
+      if v == name then
+        found = true
+        break
+      end
+      if not found then
+        table.insert(peripherals, "dc:" .. (nicknames[name] or name))
+      end
+    end
+  end
+
+  return peripherals
 end
 
 --- Connections menu
@@ -133,36 +183,7 @@ local function connections_menu()
   local right_index = 1
   local left_scroll = 1
   local right_scroll = 1
-
-  --- Get all peripherals by their name (and nickname, if stored)
-  ---@return string[] peripherals The list of peripheral names.
-  local function get_peripherals()
-    local peripherals = peripheral.getNames()
-
-    -- Replace names with nicknames
-    for i, v in ipairs(peripherals) do
-      if nicknames[v] then
-        peripherals[i] = nicknames[v]
-      end
-    end
-
-    -- Iterate through connections and add any peripherals from that list that
-    -- have been disconnected.
-    for name in pairs(connections) do
-      for i, v in ipairs(peripherals) do
-        local found = false
-        if v == name then
-          found = true
-          break
-        end
-        if not found then
-          table.insert(peripherals, "dc:" .. (nicknames[name] or name))
-        end
-      end
-    end
-
-    return peripherals
-  end
+  local cached_peripheral_list = get_peripherals()
 
   --- Calculate possible outputs for a given input.
   --- This does NOT show disconnected peripherals.
@@ -172,7 +193,7 @@ local function connections_menu()
     local outputs = {}
 
     -- Iterate through all peripherals, and if they are not the input, add them to the list.
-    local peripherals = peripheral.getNames()
+    local peripherals = cached_peripheral_list
 
     for i, v in ipairs(peripherals) do
       if v ~= input then
@@ -187,24 +208,36 @@ local function connections_menu()
     PrimeUI.clear()
 
     -- Draw info box.
-    local info = "Press tab to alternate between inputs and outputs.\nPress enter to toggle on a connection.\nPress space to toggle connection mode.\nPress backspace to exit.\nNote: Applies and saves on exit.\n\nConnection mode: %s"
+    local info =
+    "Press tab to alternate between inputs and outputs.\nPress enter to toggle on a connection.\nPress space to toggle connection mode.\nPress backspace to exit.\nNote: Applies and saves on exit.\n\nConnection mode: %s"
     local connection_mode = connections[1] and connections[1][1] or "None"
     info_box(win, "Connections", info:format(connection_mode), 8)
 
     -- Draw the two bottom selection boxes.
-    local width_half = math.floor(width / 2) - 3 -- sub 4 for the border
-    local height_selections = 6 --?
+    local width_half = math.floor(width / 2) - 3
+    local height_selections = 6
 
-    local periphs = get_peripherals()
-    if #periphs == 0 then
-      periphs = {"No peripherals"}
+    cached_peripheral_list = selector_toggle and cached_peripheral_list or get_peripherals()
+    if #cached_peripheral_list == 0 then
+      cached_peripheral_list = { "No peripherals" }
+    end
+
+    local peripherals_with_nicks = {}
+    for i, v in ipairs(cached_peripheral_list) do
+      table.insert(peripherals_with_nicks, nicknames[v] or v)
+    end
+
+    local outputs = get_outputs(cached_peripheral_list[left_index])
+    local outputs_with_nicks = {}
+    for i, v in ipairs(outputs) do
+      table.insert(outputs_with_nicks, nicknames[v] or v)
     end
 
     outlined_selection_box(
       win,
       3, 13,
       width_half, height_selections,
-      periphs,
+      peripherals_with_nicks,
       "left", "change_left",
       selector_toggle and colors.gray or colors.white, colors.black,
       left_index, left_scroll,
@@ -216,7 +249,7 @@ local function connections_menu()
       win,
       width_half + 6, 13,
       width_half, height_selections,
-      periphs[1] == "No peripherals" and {"No peripherals"} or get_outputs(periphs[left_index]),
+      cached_peripheral_list[1] == "No peripherals" and { "No peripherals" } or outputs_with_nicks,
       "right", "change_right",
       selector_toggle and colors.white or colors.gray, colors.black,
       right_index, right_scroll,
@@ -262,7 +295,6 @@ local function connections_menu()
         right_index = 1
         right_scroll = 1
         -- The items on the right also need to be recalculated.
-
       elseif event == "change_right" then
         right_index = selected
         right_scroll = scroll
@@ -280,7 +312,101 @@ local function tickrate_menu()
 end
 
 local function nickname_menu()
+  --[[
+    ######################################################
+    # Nicknames                                          #
+    # Press enter to edit a nickname.                    #
+    # Press backspace to exit.                           #
+    ######################################################
+    ######################################################
+    # > peripheral_1                                     #
+    #   peripheral_2                                     #
+    #   peripheral_3                                     #
+    #   ...                                              #
+    #   ...                                              #
+    ######################################################
+    # nickname nickname nickname nickname nickname       #
+    ######################################################
+  ]]
 
+  local run = true
+  local index = 1
+  local scroll = 1
+  local win = window.create(term.current(), 1, 1, term.getSize())
+  local width, height = win.getSize()
+  local editing = false
+
+  local cached_peripheral_list = get_peripherals()
+
+  while run do
+    PrimeUI.clear()
+
+    -- Draw info box.
+    local info = "Press enter to edit a nickname.\nPress backspace to exit (while not editing)."
+    info_box(win, "Nicknames", info, 2)
+
+    cached_peripheral_list = editing and cached_peripheral_list or get_peripherals()
+    if #cached_peripheral_list == 0 then
+      cached_peripheral_list = { "No peripherals" }
+    end
+
+    outlined_selection_box(
+      win,
+      3, 7,
+      width - 4, 9,
+      cached_peripheral_list,
+      "edit", "change",
+      editing and colors.gray or colors.white, colors.black,
+      index, scroll,
+      editing
+    )
+    PrimeUI.textBox(win, 3, 6, 13, 1, " Peripherals ", editing and colors.gray or colors.purple)
+
+    outlined_input_box(
+      win,
+      3, height - 1,
+      width - 4,
+      "text_box",
+      editing and colors.white or colors.gray, colors.black,
+      nil, nil, nil,
+      nicknames[cached_peripheral_list[index]] or cached_peripheral_list[index],
+      not editing
+    )
+    local x, y = term.getCursorPos()
+    PrimeUI.textBox(win, 3, height - 2, 10, 1, " Nickname ", editing and colors.purple or colors.gray)
+
+    if not editing then
+      -- Backspace key: exits the menu
+      PrimeUI.keyAction(keys.backspace, "exit")
+    end
+
+    -- Reset the cursor position to be in the input box, and ensure it is visible if it needs to be.
+    term.setCursorPos(x, y)
+    term.setTextColor(colors.white)
+    term.setCursorBlink(editing)
+
+    -- Run the UI
+    local object, event, selected, _scroll = PrimeUI.run()
+
+    if object == "keyAction" then
+      if event == "exit" then
+        run = false
+      end
+    elseif object == "selectionBox" then
+      if event == "edit" then
+        -- Edit the nickname of the selected peripheral.
+        editing = true
+      elseif event == "change" then
+        index = selected
+        scroll = _scroll
+      end
+    elseif object == "inputBox" then
+      if event == "text_box" then
+        nicknames[cached_peripheral_list[index]] = selected
+        editing = false
+      end
+    end
+  end
 end
 
 
