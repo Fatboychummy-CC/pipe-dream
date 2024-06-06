@@ -465,7 +465,13 @@ local function nickname_menu()
       end
     elseif object == "inputBox" then
       if event == "text_box" then
-        nicknames[cached_peripheral_list[index]] = selected
+        if selected == cached_peripheral_list[index] or selected == "" then
+          -- Remove the nickname
+          nicknames[cached_peripheral_list[index]] = nil
+        else
+          -- Set the nickname
+          nicknames[cached_peripheral_list[index]] = selected
+        end
         editing = false
       end
     end
