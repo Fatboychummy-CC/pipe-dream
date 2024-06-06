@@ -4,19 +4,25 @@ local file_helper = require "file_helper"
 local data_dir = file_helper:instanced("data")
 
 local LISTS_FILE = "lists.txt"
+local NICKNAMES_FILE = "nicknames.txt"
 local ITEMS_MOVED_FILE = "items_moved.txt"
 local CONNECTIONS_FILE = "connections.txt"
 local UPDATE_TICKRATE_FILE = "update_tickrate.txt"
+local MOVING_ITEMS_FILE = "moving_items.txt"
 
 local lists = data_dir:unserialize(LISTS_FILE, {})
+local nicknames = data_dir:unserialize(NICKNAMES_FILE, {})
 local items_moved = data_dir:unserialize(ITEMS_MOVED_FILE, 0)
 local connections = data_dir:unserialize(CONNECTIONS_FILE, {})
+local moving_items = data_dir:unserialize(MOVING_ITEMS_FILE, true)
 local update_tickrate = data_dir:unserialize(UPDATE_TICKRATE_FILE, 10)
 
 local function save()
   data_dir:serialize(LISTS_FILE, lists)
+  data_dir:serialize(NICKNAMES_FILE, nicknames)
   data_dir:serialize(ITEMS_MOVED_FILE, items_moved)
   data_dir:serialize(CONNECTIONS_FILE, connections)
+  data_dir:serialize(MOVING_ITEMS_FILE, moving_items)
   data_dir:serialize(UPDATE_TICKRATE_FILE, update_tickrate)
 end
 
@@ -31,6 +37,11 @@ if type(update_tickrate) ~= "number" then
   update_tickrate = 10
 end
 ---@cast update_tickrate number
+
+-- We are also also fine if this value fails to load, as it will not break the program.
+if type(nicknames) ~= "table" then
+  nicknames = {}
+end
 
 -- We are not fine if this value fails to load, as it will break the program.
 if type(connections) ~= "table" then
@@ -53,58 +64,41 @@ local function count_table(tbl)
   return count
 end
 
-local function info_box(win, title, desc)
-  local width, height = term.getSize()
-  local max_width, max_height = width - 4, height - 4 - 10
-  local info_height = height - max_height - 6
+--- Create an information box.
+---@param win Window The window to draw the box on.
+---@param title string The title of the box.
+---@param desc string The description of the box.
+---@param height integer The height of the box.
+local function info_box(win, title, desc, height)
+  local width = win.getSize()
+  width = width - 4
 
   -- Info box with border
-  PrimeUI.borderBox(win, 3, 3, max_width, info_height)
-  PrimeUI.textBox(win, 3, 3, max_width, 1, title, colors.purple)
-  PrimeUI.textBox(win, 3, 4, max_width, info_height - 1, desc, colors.lightGray)
+  PrimeUI.borderBox(win, 3, 3, width, height)
+  PrimeUI.textBox(win, 3, 2, #title + 2, 1, ' ' .. title .. ' ', colors.purple)
+  PrimeUI.textBox(win, 3, 3, width, height, desc, colors.lightGray)
 end
 
---- Create a menu given a list of options.
----@param title string The title of the menu
----@param desc string The description of the menu
----@param ... string The list of options to display
-local function quick_menu(title, desc, ...)
-  local options = { ... }
-
-  local win = window.create(term.current(), 1, 1, term.getSize())
-
-  PrimeUI.clear()
-
-  local width, height = term.getSize()
-  local max_width, max_height = width - 4, height - 4 - 10
-  local info_height = height - max_height - 6
-
+--- Create a selection box, with a list of items.
+---@param win Window The window to draw the box on.
+---@param x integer The x position of the box.
+---@param y integer The y position of the box.
+---@param width integer The width of the box.
+---@param height integer The height of the box.
+---@param items string[] The items to display in the box.
+---@param action string|fun(index: integer, scroll_index: integer) The action to perform when an item is selected.
+---@param select_change_action nil|string|fun(index: integer, scroll_index: integer) The action to perform when the selection changes.
+---@param fg_color integer The color of the text.
+---@param bg_color integer The color of the background.
+---@param initial_index integer The index of the item to select initially.
+---@param initial_scroll integer The index of the item to scroll to initially.
+---@param disabled boolean? Whether the box is disabled (displayed, but not interactable).
+local function outlined_selection_box(win, x, y, width, height, items, action, select_change_action, fg_color, bg_color, initial_index, initial_scroll, disabled)
   -- Selection box with border
-  PrimeUI.borderBox(win, 3, 3 + 10, max_width, max_height)
-  local sel_name = "selection"
-  PrimeUI.selectionBox(
-    win,
-    3, 3 + 10,
-    max_width + 1, max_height,
-    options,
-    sel_name
-  )
+  PrimeUI.borderBox(win, x, y, width, height, fg_color, bg_color)
 
-  -- Info box with border
-  info_box(win, title, desc)
-
-  local event, action, selected = PrimeUI.run()
-
-  term.clear()
-  term.setCursorPos(1, 1)
-  term.setTextColor(colors.white)
-  term.setBackgroundColor(colors.black)
-
-  print(event, action, selected)
-
-  if action == sel_name then
-    return selected
-  end
+  -- Draw the items
+  PrimeUI.selectionBox(win, x, y, width + 1, height, items, action, select_change_action, fg_color, bg_color, initial_index, initial_scroll, disabled)
 end
 
 --- Connections menu
@@ -122,25 +116,159 @@ local function connections_menu()
     #       closed.                                      #
     ######################################################
     ########## INPUT ######### ######### OUTPUT ##########
-    # > peripheral_1         # # > 1. peripheral_2       # -- Currently selected node will not appear in output list
-    #   peripheral_2         # #   2. peripheral_3       #
+    # > peripheral_1         # # > peripheral_2          # -- Currently selected node will not appear in output list
+    #   peripheral_2         # #   1. peripheral_3       # -- Selected nodes will be prefixed by their index in output list.
+    #                        # #                         # -- output nodes will not show in input list
     ########################## ###########################
   ]]
 
   -- Outline the information box.
   local win = window.create(term.current(), 1, 1, term.getSize())
+  local width, height = win.getSize()
 
-  PrimeUI.clear()
+  local selector_toggle = false
+  local run = true
 
-  local width, height = term.getSize()
-  local max_width, max_height = width - 4, height - 4 - 10
-  local info_height = height - max_height - 6
+  local left_index = 1
+  local right_index = 1
+  local left_scroll = 1
+  local right_scroll = 1
 
-  -- Info box
-  info_box(win, "Connections",
-    "Press tab to alternate between ins and outs.\nPress enter to toggle a connection.\nPress space to toggle connection mode.\nPress backspace to exit.\nNote: Applies changes and saves upon exit.\n\nConnection mode: Fill 1 then fill 2 ...")
+  --- Get all peripherals by their name (and nickname, if stored)
+  ---@return string[] peripherals The list of peripheral names.
+  local function get_peripherals()
+    local peripherals = peripheral.getNames()
 
-  PrimeUI.run()
+    -- Replace names with nicknames
+    for i, v in ipairs(peripherals) do
+      if nicknames[v] then
+        peripherals[i] = nicknames[v]
+      end
+    end
+
+    -- Iterate through connections and add any peripherals from that list that
+    -- have been disconnected.
+    for name in pairs(connections) do
+      for i, v in ipairs(peripherals) do
+        local found = false
+        if v == name then
+          found = true
+          break
+        end
+        if not found then
+          table.insert(peripherals, "dc:" .. (nicknames[name] or name))
+        end
+      end
+    end
+
+    return peripherals
+  end
+
+  --- Calculate possible outputs for a given input.
+  --- This does NOT show disconnected peripherals.
+  ---@param input string The input peripheral.
+  ---@return string[] outputs The list of possible output peripherals.
+  local function get_outputs(input)
+    local outputs = {}
+
+    -- Iterate through all peripherals, and if they are not the input, add them to the list.
+    local peripherals = peripheral.getNames()
+
+    for i, v in ipairs(peripherals) do
+      if v ~= input then
+        table.insert(outputs, v)
+      end
+    end
+
+    return outputs
+  end
+
+  while run do
+    PrimeUI.clear()
+
+    -- Draw info box.
+    local info = "Press tab to alternate between inputs and outputs.\nPress enter to toggle on a connection.\nPress space to toggle connection mode.\nPress backspace to exit.\nNote: Applies and saves on exit.\n\nConnection mode: %s"
+    local connection_mode = connections[1] and connections[1][1] or "None"
+    info_box(win, "Connections", info:format(connection_mode), 8)
+
+    -- Draw the two bottom selection boxes.
+    local width_half = math.floor(width / 2) - 3 -- sub 4 for the border
+    local height_selections = 6 --?
+
+    local periphs = get_peripherals()
+    if #periphs == 0 then
+      periphs = {"No peripherals"}
+    end
+
+    outlined_selection_box(
+      win,
+      3, 13,
+      width_half, height_selections,
+      periphs,
+      "left", "change_left",
+      selector_toggle and colors.gray or colors.white, colors.black,
+      left_index, left_scroll,
+      selector_toggle
+    )
+    PrimeUI.textBox(win, 3, 12, 8, 1, " Inputs ", selector_toggle and colors.gray or colors.purple)
+
+    outlined_selection_box(
+      win,
+      width_half + 6, 13,
+      width_half, height_selections,
+      periphs[1] == "No peripherals" and {"No peripherals"} or get_outputs(periphs[left_index]),
+      "right", "change_right",
+      selector_toggle and colors.white or colors.gray, colors.black,
+      right_index, right_scroll,
+      not selector_toggle
+    )
+    PrimeUI.textBox(win, width_half + 6, 12, 9, 1, " Outputs ", selector_toggle and colors.purple or colors.gray)
+
+    -- Tab key: swaps which selection box is selected.
+    PrimeUI.keyAction(keys.tab, "toggle_selector")
+
+    -- Space key: toggles the connection mode
+    PrimeUI.keyAction(keys.space, "toggle_mode")
+
+    -- Backspace key: exits the menu
+    PrimeUI.keyAction(keys.backspace, "exit")
+
+    local object, event, selected, scroll = PrimeUI.run()
+
+    if object == "keyAction" then
+      if event == "toggle_selector" then
+        selector_toggle = not selector_toggle
+      elseif event == "toggle_mode" then
+        if connections[left_index] then
+          if connections[left_index][1] == "split" then
+            connections[left_index][1] = "1234"
+          elseif connections[left_index][1] == "1234" then
+            connections[left_index][1] = "split"
+          end
+        end
+      elseif event == "exit" then
+        run = false
+      end
+    elseif object == "selectionBox" then
+      if event == "left" then
+        -- activate right box
+        selector_toggle = not selector_toggle
+      elseif event == "right" then
+        -- Toggle connection from left node to this node.
+      elseif event == "change_left" then
+        left_index = selected
+        left_scroll = scroll
+        -- If the left changes, the right needs to be reset
+        right_index = 1
+        right_scroll = 1
+        -- The items on the right also need to be recalculated.
+
+      elseif event == "change_right" then
+        right_index = selected
+        right_scroll = scroll
+      end
+    end
+  end
 end
 
 local function list_menu()
@@ -151,40 +279,59 @@ local function tickrate_menu()
 
 end
 
+local function nickname_menu()
+
+end
+
 
 --- Main menu
 local function main_menu()
   local update_connections = "Update Connections"
   local whitelist_blacklist = "Change Connection Whitelists/Blacklists"
   local update_rate = "Change Update Rate"
+  local nickname = "Change Peripheral Nicknames"
+  local toggle = "Toggle Running"
   local exit = "Exit"
 
-  local description = ("Select an option from the list below.\n\nTotal items moved: %d\nTotal connections: %d\n\nUpdate rate: Every %d tick%s")
+  local description = ("Select an option from the list below.\n\nTotal items moved: %d\nTotal connections: %d\n\nUpdate rate: Every %d tick%s\nRunning: %s")
       :format(
         items_moved,
         count_table(connections),
         update_tickrate,
-        update_tickrate == 1 and "" or "s"
+        update_tickrate == 1 and "" or "s",
+        moving_items and "Yes" or "No"
       )
 
-  local selected = quick_menu(
-    "Main Menu",
-    description,
+  local win = window.create(term.current(), 1, 1, term.getSize())
+  local width, height = win.getSize()
+
+  PrimeUI.clear()
+
+  -- Create the information box.
+  info_box(win, "Main Menu", description, 7)
+
+  -- Create the selection box.
+  outlined_selection_box(win, 4, 13, width - 6, height - 13, {
     update_connections,
     whitelist_blacklist,
     update_rate,
+    nickname,
+    toggle,
     exit
-  )
+  }, "selection", nil, colors.white, colors.black, 1, 1)
+
+  local object, event, selected = PrimeUI.run()
 
   if selected == update_connections then
-    print("Update connections uwu")
     connections_menu()
   elseif selected == whitelist_blacklist then
-    print("Change whitelist/blacklist uwu")
     list_menu()
   elseif selected == update_rate then
-    print("Change update rate uwu")
     tickrate_menu()
+  elseif selected == nickname then
+    nickname_menu()
+  elseif selected == toggle then
+    moving_items = not moving_items
   elseif selected == exit then
     print("Exiting...")
     return true
@@ -194,7 +341,13 @@ local function main_menu()
 end
 
 while true do
-  if main_menu() then
+  local ok, result = pcall(main_menu)
+  if not ok then
+    print() -- put the cursor back on the screen
+    error(result, 0)
+    break
+  elseif result then
+    print() -- put the cursor back on the screen
     break
   end
 end
