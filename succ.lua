@@ -47,7 +47,17 @@ end
 if type(connections) ~= "table" then
   error("Connections file might be corrupted, please check it for errors. Cannot read it currently.", 0)
 end
----@cast connections table<string, string[]> -- connections[peripheral_name] = { "split"/"1234", peripheral_1, peripheral_2, ... }
+---@cast connections table<string, Connection[]>
+
+---@class Connection
+---@field name string The name of the connection.
+---@field from string The peripheral the connection is from.
+---@field to string[] The peripherals the connection is to.
+---@field whitelist string[] The whitelist of items.
+---@field blacklist string[] The blacklist of items.
+---@field list_mode "whitelist"|"blacklist" The mode of the connection.
+---@field mode "1234"|"split" The mode of the connection. 1234 means "push and fill 1, then 2, then 3, then 4". Split means "split input evenly between all outputs".
+---@field moving boolean Whether the connection is active (moving items).
 
 -- We are also not fine if this value fails to load, as it will break the program.
 if type(lists) ~= "table" then
@@ -134,18 +144,16 @@ local function get_peripherals()
     peripherals[i] = v
   end
 
+  local periph_lookup = {}
+  for i, v in ipairs(peripherals) do
+    periph_lookup[v] = true
+  end
+
   -- Iterate through connections and add any peripherals from that list that
   -- have been disconnected.
   for name in pairs(connections) do
-    for i, v in ipairs(peripherals) do
-      local found = false
-      if v == name then
-        found = true
-        break
-      end
-      if not found then
-        table.insert(peripherals, "dc:" .. (nicknames[name] or name))
-      end
+    if not periph_lookup[name] then
+      table.insert(peripherals, "dc:" .. (nicknames[name] or name))
     end
   end
 
@@ -174,160 +182,78 @@ local function unacceptable(_type, reason)
   PrimeUI.run()
 end
 
+local function connections_add_menu()
+
+end
+
+local function connections_edit_menu()
+
+end
+
+local function connections_remove_menu()
+
+end
+
 --- Connections menu
-local function connections_menu()
+local function connections_main_menu()
   --[[
     ######################################################
     # Connections                                        #
-    # Press tab to alternate between inputs and outputs. #
-    # Press enter to toggle on a connection.             #
-    # Press space to toggle connection mode.             #
-    # Press backspace to exit.                           #
-    # Connection mode: Fill 1 then fill 2 then fill 3... # -- Other modes: 'split evenly' (self-explanatory), 'none' (no connections currently), or
-    #                                                    # -- 'output node' (this node is already set to be the output of something else, and cannot be an input)
-    # Note: Connections are not saved until this menu is #
-    #       closed.                                      #
+    #                                                    #
+    # Total Connections: x                               #
     ######################################################
-    ########## INPUT ######### ######### OUTPUT ##########
-    # > peripheral_1         # # > peripheral_2          # -- Currently selected node will not appear in output list
-    #   peripheral_2         # #   1. peripheral_3       # -- Selected nodes will be prefixed by their index in output list.
-    #                        # #                         # -- output nodes will not show in input list
-    ########################## ###########################
+    ######################################################
+    # > Add Connection                                   #
+    #   Edit Connection                                  #
+    #   Remove Connection                                #
+    #   Go Back                                          # -- backspace will also work
+    ######################################################
   ]]
 
-  -- Outline the information box.
   local win = window.create(term.current(), 1, 1, term.getSize())
   local width, height = win.getSize()
 
-  local selector_toggle = false
-  local run = true
-
-  local left_index = 1
-  local right_index = 1
-  local left_scroll = 1
-  local right_scroll = 1
-  local cached_peripheral_list = get_peripherals()
-
-  --- Calculate possible outputs for a given input.
-  --- This does NOT show disconnected peripherals.
-  ---@param input string The input peripheral.
-  ---@return string[] outputs The list of possible output peripherals.
-  local function get_outputs(input)
-    local outputs = {}
-
-    -- Iterate through all peripherals, and if they are not the input, add them to the list.
-    local peripherals = cached_peripheral_list
-
-    for i, v in ipairs(peripherals) do
-      if v ~= input then
-        table.insert(outputs, v)
-      end
-    end
-
-    return outputs
-  end
-
-  while run do
+  while true do
     PrimeUI.clear()
 
     -- Draw info box.
-    local info =
-    "Press tab to alternate between inputs and outputs.\nPress enter to toggle on a connection.\nPress space to toggle connection mode.\nPress backspace to exit.\nNote: Applies and saves on exit.\n\nConnection mode: %s"
-    local connection_mode = connections[1] and connections[1][1] or "None"
-    info_box(win, "Connections", info:format(connection_mode), 8)
+    info_box(win, "Connections", ("Total Connections: %d"):format(count_table(connections)), 1)
 
-    -- Draw the two bottom selection boxes.
-    local width_half = math.floor(width / 2) - 3
-    local height_selections = 6
+    local add_connection = "Add Connection"
+    local edit_connection = "Edit Connection"
+    local remove_connection = "Remove Connection"
+    local go_back = "Go Back"
 
-    cached_peripheral_list = selector_toggle and cached_peripheral_list or get_peripherals()
-    if #cached_peripheral_list == 0 then
-      cached_peripheral_list = { "No peripherals" }
-    end
+    -- Draw the selection box.
+    outlined_selection_box(win, 3, 6, width - 4, 4, {
+      add_connection,
+      edit_connection,
+      remove_connection,
+      go_back
+    }, "selection", nil, colors.white, colors.black, 1, 1)
 
-    local peripherals_with_nicks = {}
-    for i, v in ipairs(cached_peripheral_list) do
-      table.insert(peripherals_with_nicks, nicknames[v] or v)
-    end
-
-    local outputs = get_outputs(cached_peripheral_list[left_index])
-    local outputs_with_nicks = {}
-    for i, v in ipairs(outputs) do
-      table.insert(outputs_with_nicks, nicknames[v] or v)
-    end
-
-    outlined_selection_box(
-      win,
-      3, 13,
-      width_half, height_selections,
-      peripherals_with_nicks,
-      "left", "change_left",
-      selector_toggle and colors.gray or colors.white, colors.black,
-      left_index, left_scroll,
-      selector_toggle
-    )
-    PrimeUI.textBox(win, 3, 12, 8, 1, " Inputs ", selector_toggle and colors.gray or colors.purple)
-
-    outlined_selection_box(
-      win,
-      width_half + 6, 13,
-      width_half, height_selections,
-      cached_peripheral_list[1] == "No peripherals" and { "No peripherals" } or outputs_with_nicks,
-      "right", "change_right",
-      selector_toggle and colors.white or colors.gray, colors.black,
-      right_index, right_scroll,
-      not selector_toggle
-    )
-    PrimeUI.textBox(win, width_half + 6, 12, 9, 1, " Outputs ", selector_toggle and colors.purple or colors.gray)
-
-    -- Tab key: swaps which selection box is selected.
-    PrimeUI.keyAction(keys.tab, "toggle_selector")
-
-    -- Space key: toggles the connection mode
-    PrimeUI.keyAction(keys.space, "toggle_mode")
-
-    -- Backspace key: exits the menu
     PrimeUI.keyAction(keys.backspace, "exit")
 
-    local object, event, selected, scroll = PrimeUI.run()
+    local object, event, selected = PrimeUI.run()
 
-    if object == "keyAction" then
-      if event == "toggle_selector" then
-        selector_toggle = not selector_toggle
-      elseif event == "toggle_mode" then
-        if connections[left_index] then
-          if connections[left_index][1] == "split" then
-            connections[left_index][1] = "1234"
-          elseif connections[left_index][1] == "1234" then
-            connections[left_index][1] = "split"
-          end
-        end
-      elseif event == "exit" then
-        run = false
+    if object == "selectionBox" then
+      if selected == add_connection then
+        unacceptable("error", "This feature is not yet implemented.")
+      elseif selected == edit_connection then
+        unacceptable("error", "This feature is not yet implemented.")
+      elseif selected == remove_connection then
+        unacceptable("error", "This feature is not yet implemented.")
+      elseif selected == go_back then
+        return
       end
-    elseif object == "selectionBox" then
-      if event == "left" then
-        -- activate right box
-        selector_toggle = not selector_toggle
-      elseif event == "right" then
-        -- Toggle connection from left node to this node.
-      elseif event == "change_left" then
-        left_index = selected
-        left_scroll = scroll
-        -- If the left changes, the right needs to be reset
-        right_index = 1
-        right_scroll = 1
-        -- The items on the right also need to be recalculated.
-      elseif event == "change_right" then
-        right_index = selected
-        right_scroll = scroll
-      end
+    elseif object == "keyAction" and event == "exit" then
+      return
     end
   end
 end
 
 local function list_menu()
-
+  unacceptable("error", "This feature is not yet implemented.")
 end
 
 local function tickrate_menu()
@@ -367,8 +293,10 @@ local function tickrate_menu()
       local value = tonumber(output)
       if not value then
         unacceptable("input", "The input must be a number.")
+      elseif value < 1 then
+        unacceptable("input", "The input must be 1 or greater.")
       else
-        update_tickrate = value
+        update_tickrate = math.ceil(value) -- disallow decimals
       end
     end
   end
@@ -518,7 +446,7 @@ local function main_menu()
   local object, event, selected = PrimeUI.run()
 
   if selected == update_connections then
-    connections_menu()
+    connections_main_menu()
   elseif selected == whitelist_blacklist then
     list_menu()
   elseif selected == update_rate then
