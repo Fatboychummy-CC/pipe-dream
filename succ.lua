@@ -47,7 +47,7 @@ end
 if type(connections) ~= "table" then
   error("Connections file might be corrupted, please check it for errors. Cannot read it currently.", 0)
 end
----@cast connections table<string, Connection[]>
+---@cast connections Connection[]
 
 ---@class Connection
 ---@field name string The name of the connection.
@@ -144,6 +144,7 @@ local function get_peripherals()
     peripherals[i] = v
   end
 
+  --[[@fixme this code needs to be re-added
   local periph_lookup = {}
   for i, v in ipairs(peripherals) do
     periph_lookup[v] = true
@@ -156,6 +157,7 @@ local function get_peripherals()
       table.insert(peripherals, "dc:" .. (nicknames[name] or name))
     end
   end
+  ]]
 
   return peripherals
 end
@@ -182,8 +184,227 @@ local function unacceptable(_type, reason)
   PrimeUI.run()
 end
 
-local function connections_add_menu()
+local keys_held = {}
+local function key_listener()
+  keys_held = {} -- Reset the keys held when this method is called.
+  while true do
+    local event, key = os.pullEvent()
+    if event == "key" then
+      keys_held[key] = true
+    elseif event == "key_up" then
+      keys_held[key] = nil
+    end
+  end
+end
 
+--- Implement the connection editing menu.
+---@param connection_data Connection? The connection data to edit.
+local function _connections_edit_impl(connection_data)
+--[[
+    ---@class Connection
+    ---@field name string The name of the connection.
+    ---@field from string The peripheral the connection is from.
+    ---@field to string[] The peripherals the connection is to.
+    ---@field whitelist string[] The whitelist of items.
+    ---@field blacklist string[] The blacklist of items.
+    ---@field list_mode "whitelist"|"blacklist" The mode of the connection.
+    ---@field mode "1234"|"split" The mode of the connection. 1234 means "push and fill 1, then 2, then 3, then 4". Split means "split input evenly between all outputs".
+    ---@field moving boolean Whether the connection is active (moving items).
+
+
+    # Add Connection ##################################### -- Sections will expand/contract as needed.
+    # Enter the name of this connection                  # -- Info box will change depending on expanded section.
+    # Press enter when done.                             #
+    ######################################################
+    # Name ###############################################
+    # blablabla                                          #
+    ######################################################
+    # Origin #############################################
+    # peripheral_1                                       #
+    ######################################################
+    # Destinations #######################################
+    # peripheral_2                                       #
+    # peripheral_3                                       #
+    # ...                                                #
+    ######################################################
+    # Filter Mode ########################################
+    # Whitelist                                          #
+    # Blacklist                                          #
+    ######################################################
+    # Filters ############################################
+    # item_1                                             #
+    # item_2                                             #
+    # ...                                                #
+    ######################################################
+    # Mode ###############################################
+    # Fill 1, then 2, then 3, then 4                     #
+    # Split evenly                                       #
+    ######################################################
+  ]]
+  connection_data = connection_data or {
+    name = "",
+    from = "",
+    to = {},
+    whitelist = {},
+    blacklist = {},
+    list_mode = "blacklist",
+    mode = "1234",
+    moving = false, -- New connections will be disabled by default
+  } 
+
+  local win = window.create(term.current(), 1, 1, term.getSize())
+  local width, height = win.getSize()
+
+  local periphs_with_nicknames = {} -- predeclare so section_info can access it.
+
+
+  local section_infos = {
+    {
+      name = "Name",
+      info = "Enter the name of this connection\nPress enter to save section data, tab to go to the next step, and shift+tab to go back.",
+      size = 1,
+      object = "input_box",
+      args = {
+        default = connection_data.name,
+        action = "set-name",
+      }
+    },
+    {
+      name = "Origin",
+      info = "Select the peripheral this connection is from.",
+      size = 7,
+      object = "selection_box",
+      args = {
+        action = "select-origin",
+        items = periphs_with_nicknames,
+      }
+    },
+    {
+      name = "Destinations",
+      info = "Select the peripherals this connection is to.",
+      size = 7,
+      object = "selection_box",
+      args = {
+        action = "select-destination",
+        items = periphs_with_nicknames,
+      }
+    },
+    {
+      name = "Filter Mode",
+      info = "Select the filter mode of the connection. You can edit the list of items later from another menu.",
+      size = 2,
+      object = "selection_box",
+      args = {
+        action = "select-filter_mode",
+        items = { "Blacklist", "Whitelist" },
+      }
+    },
+    {
+      name = "Mode",
+      info = "Select the mode of the connection.",
+      size = 2,
+      object = "selection_box",
+      args = {
+        action = "select-mode",
+        items = { "Fill 1, then 2, then 3, then 4", "Split evenly" },
+      }
+    }
+  }
+
+  local cached_peripheral_list = get_peripherals()
+  local expanded_section = 1
+
+  while true do
+    local section_info = section_infos[expanded_section]
+
+    -- Update peripheral list
+    -- Clear the list
+    while periphs_with_nicknames[1] do
+      table.remove(periphs_with_nicknames)
+    end
+
+    -- Add the peripherals to the list
+    for i, v in ipairs(cached_peripheral_list) do
+      periphs_with_nicknames[i] = nicknames[v] or v
+    end
+    for i = 1, #connection_data.to do
+      periphs_with_nicknames[connection_data.to[i]] = i .. ". " .. (nicknames[connection_data.to[i]] or connection_data.to[i])
+    end
+
+    if #periphs_with_nicknames == 0 then
+      periphs_with_nicknames = { "No peripherals" }
+    end
+
+    -- Begin drawing
+    PrimeUI.clear()
+
+
+    -- Draw info box.
+    info_box(win, "Add Connection", section_info.info, 3)
+
+    local y = 8
+
+    -- Draw the sections
+    for i = 1, #section_infos do
+      local section = section_infos[i]
+      local expanded = i == expanded_section
+      local color = expanded and colors.purple or colors.gray
+
+      if expanded then
+        -- Draw the stuffs
+        local object = section.object
+        local args = section.args
+
+        if object == "input_box" then
+          -- Input box
+          outlined_input_box(win, 3, y, width - 4, args.action, colors.white, colors.black, nil, nil, nil, args.default)
+        elseif object == "selection_box" then
+          -- Selection box
+          outlined_selection_box(win, 3, y, width - 4, section.size, args.items, args.action, nil, colors.white, colors.black, 1, 1)
+        else
+          error("Invalid object type '" .. tostring(object) .. "' at index " .. i)
+        end
+
+        -- Draw the text box
+        PrimeUI.textBox(win, 3, y - 1, #section.name + 2, 1, ' ' .. section.name .. ' ', color, colors.black)
+      else
+        -- Draw the border box and text box
+        PrimeUI.borderBox(win, 3, y, width - 4, -1, color, colors.black)
+        PrimeUI.textBox(win, 3, y - 1, #section.name + 2, 1, ' ' .. section.name .. ' ', color, colors.black)
+      end
+
+      y = y + (expanded and section.size + 2 or 1)
+    end
+
+    -- Tab: advance the expanded section, saving any relevant data.
+    -- shift+tab: go back a section, saving any relevant data.
+    PrimeUI.keyAction(keys.tab, "section_switch")
+
+    local object, event, result = PrimeUI.run()
+
+    if object == "keyAction" then
+      if event == "section_switch" then
+        if keys_held[keys.leftShift] then
+          expanded_section = expanded_section - 1
+          if expanded_section < 1 then
+            return -- exit, not saving any data.
+            ---@fixme Add a confirmation prompt here.
+          end
+        else
+          expanded_section = expanded_section + 1
+          if expanded_section > #section_infos then
+            ---@fixme Save data here.
+          end
+        end
+      end
+    elseif object == "selectionBox" then
+
+    end
+  end
+end
+
+local function connections_add_menu()
+  parallel.waitForAny(key_listener, _connections_edit_impl)
 end
 
 local function connections_edit_menu()
@@ -217,7 +438,7 @@ local function connections_main_menu()
     PrimeUI.clear()
 
     -- Draw info box.
-    info_box(win, "Connections", ("Total Connections: %d"):format(count_table(connections)), 1)
+    info_box(win, "Connections", ("Total Connections: %d"):format(#connections), 1)
 
     local add_connection = "Add Connection"
     local edit_connection = "Edit Connection"
@@ -238,11 +459,11 @@ local function connections_main_menu()
 
     if object == "selectionBox" then
       if selected == add_connection then
-        unacceptable("error", "This feature is not yet implemented.")
+        connections_add_menu()
       elseif selected == edit_connection then
-        unacceptable("error", "This feature is not yet implemented.")
+        connections_edit_menu()
       elseif selected == remove_connection then
-        unacceptable("error", "This feature is not yet implemented.")
+        connections_remove_menu()
       elseif selected == go_back then
         return
       end
@@ -419,7 +640,7 @@ local function main_menu()
   local description = ("Select an option from the list below.\n\nTotal items moved: %d\nTotal connections: %d\n\nUpdate rate: Every %d tick%s\nRunning: %s")
       :format(
         items_moved,
-        count_table(connections),
+        #connections,
         update_tickrate,
         update_tickrate == 1 and "" or "s",
         moving_items and "Yes" or "No"
