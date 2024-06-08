@@ -127,11 +127,13 @@ end
 ---@param completion_func nil|fun(text: string): string[] The function to call for completion.
 ---@param default string? The default text to display in the input box.
 ---@param disabled boolean? Whether the box is disabled (displayed, but not interactable).
-local function outlined_input_box(win, x, y, width, action, fg_color, bg_color, replacement, history, completion_func, default, disabled)
+local function outlined_input_box(win, x, y, width, action, fg_color, bg_color, replacement, history, completion_func,
+                                  default, disabled)
   -- Input box with border
   PrimeUI.borderBox(win, x, y, width, 1, fg_color, bg_color)
 
-  return PrimeUI.inputBox(win, x, y, width, action, fg_color, bg_color, replacement, history, completion_func, default, disabled)
+  return PrimeUI.inputBox(win, x, y, width, action, fg_color, bg_color, replacement, history, completion_func, default,
+    disabled)
 end
 
 --- Get all peripherals by their name
@@ -174,9 +176,11 @@ local function unacceptable(_type, reason)
   if _type == "error" then
     info_box(win, "Error", ("An error occurred.\n%s\n\nPress enter to continue."):format(reason), 10, colors.red)
   elseif _type == "input" then
-    info_box(win, "Input Error", ("The last user input was unacceptable.\n%s\n\nPress enter to continue."):format(reason), 4, colors.red)
+    info_box(win, "Input Error", ("The last user input was unacceptable.\n%s\n\nPress enter to continue."):format(reason),
+      4, colors.red)
   else
-    info_box(win, "Unknown Error", ("An unknown error occurred.\n%s\n\nPress enter to continue."):format(reason), 10, colors.red)
+    info_box(win, "Unknown Error", ("An unknown error occurred.\n%s\n\nPress enter to continue."):format(reason), 10,
+      colors.red)
   end
 
   PrimeUI.keyAction(keys.enter, "exit")
@@ -253,7 +257,7 @@ end
 --- Implement the connection editing menu.
 ---@param connection_data Connection? The connection data to edit.
 local function _connections_edit_impl(connection_data)
---[[
+  --[[
     ---@class Connection
     ---@field name string The name of the connection.
     ---@field from string The peripheral the connection is from.
@@ -310,7 +314,7 @@ local function _connections_edit_impl(connection_data)
   local win = window.create(term.current(), 1, 1, term.getSize())
   local width, height = win.getSize()
 
-  local periphs_with_nicknames = {} -- predeclare so section_info can access it.
+  local periphs_with_nicknames = {}             -- predeclare so section_info can access it.
   local destination_periphs_with_nicknames = {} -- predeclare so section_info can access it.
 
 
@@ -320,7 +324,8 @@ local function _connections_edit_impl(connection_data)
         (connection_data.name == "") and "Name" or
         "Name - " .. connection_data.name
       ),
-      info = "Enter the name of this connection\nPress enter to save section data, tab to go to the next step, and shift+tab to go back.",
+      info =
+      "Enter the name of this connection\nPress enter to save section data, tab to go to the next step, and shift+tab to go back.",
       size = 1,
       object = "input_box",
       args = {
@@ -347,7 +352,6 @@ local function _connections_edit_impl(connection_data)
       name = (
         (#connection_data.to == 0) and "Destinations" or
         "Destinations - " .. (#connection_data.to) .. " selected"
-      
       ),
       info = "Select the peripherals this connection is to.",
       size = 7,
@@ -362,7 +366,6 @@ local function _connections_edit_impl(connection_data)
       name = (
         (connection_data.filter_mode == "") and "Filter Mode" or
         "Filter Mode - " .. connection_data.filter_mode
-      
       ),
       info = "Select the filter mode of the connection. The list starts empty, and you can edit it in another menu.",
       size = 2,
@@ -467,7 +470,8 @@ local function _connections_edit_impl(connection_data)
             args.items = { "No peripherals" }
           end
 
-          outlined_selection_box(win, 3, y, width - 4, section.size, args.items, args.action, nil, colors.white, colors.black, args.selection or 1, args.scroll or 1)
+          outlined_selection_box(win, 3, y, width - 4, section.size, args.items, args.action, nil, colors.white,
+            colors.black, args.selection or 1, args.scroll or 1)
         else
           error("Invalid object type '" .. tostring(object) .. "' at index " .. i)
         end
