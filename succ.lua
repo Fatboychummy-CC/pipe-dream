@@ -229,6 +229,27 @@ local function verify_connection(connection_data)
   return true, "Connection is valid, so you should not see this message. This is a bug if you do."
 end
 
+--- Ask the user if they're sure they want to exit without saving.
+---@return boolean sure Whether the user is sure they want to exit without saving.
+local function confirm_exit_no_save()
+  local win = window.create(term.current(), 1, 1, term.getSize())
+  local width, height = win.getSize()
+
+  PrimeUI.clear()
+
+  -- Draw info box.
+  info_box(win, "Exit Without Saving", "Are you sure you want to exit without saving?", 1)
+
+  outlined_selection_box(win, 3, 7, width - 4, 2, {
+    "No",
+    "Yes"
+  }, "selection", nil, colors.white, colors.black, 1, 1)
+
+  local object, event, result = PrimeUI.run()
+
+  return result == "Yes"
+end
+
 --- Implement the connection editing menu.
 ---@param connection_data Connection? The connection data to edit.
 local function _connections_edit_impl(connection_data)
@@ -282,7 +303,9 @@ local function _connections_edit_impl(connection_data)
     filter_mode = "blacklist",
     mode = "1234",
     moving = false, -- New connections will be disabled by default
-  } 
+  }
+  local cached_peripheral_list = get_peripherals()
+  local expanded_section = 1
 
   local win = window.create(term.current(), 1, 1, term.getSize())
   local width, height = win.getSize()
@@ -293,7 +316,10 @@ local function _connections_edit_impl(connection_data)
 
   local section_infos = {
     {
-      name = "Name",
+      name = (
+        (connection_data.name == "") and "Name" or
+        "Name - " .. connection_data.name
+      ),
       info = "Enter the name of this connection\nPress enter to save section data, tab to go to the next step, and shift+tab to go back.",
       size = 1,
       object = "input_box",
@@ -304,7 +330,10 @@ local function _connections_edit_impl(connection_data)
       increment_on_enter = true
     },
     {
-      name = "Origin",
+      name = (
+        (connection_data.from == "") and "Origin" or
+        "Origin - " .. (nicknames[connection_data.from] or connection_data.from)
+      ),
       info = "Select the peripheral this connection is from.",
       size = 7,
       object = "selection_box",
@@ -315,7 +344,11 @@ local function _connections_edit_impl(connection_data)
       increment_on_enter = true
     },
     {
-      name = "Destinations",
+      name = (
+        (#connection_data.to == 0) and "Destinations" or
+        "Destinations - " .. (#connection_data.to) .. " selected"
+      
+      ),
       info = "Select the peripherals this connection is to.",
       size = 7,
       object = "selection_box",
@@ -326,7 +359,11 @@ local function _connections_edit_impl(connection_data)
       increment_on_enter = false
     },
     {
-      name = "Filter Mode",
+      name = (
+        (connection_data.filter_mode == "") and "Filter Mode" or
+        "Filter Mode - " .. connection_data.filter_mode
+      
+      ),
       info = "Select the filter mode of the connection. The list starts empty, and you can edit it in another menu.",
       size = 2,
       object = "selection_box",
@@ -337,7 +374,10 @@ local function _connections_edit_impl(connection_data)
       increment_on_enter = true
     },
     {
-      name = "Mode",
+      name = (
+        (connection_data.mode == "") and "Mode" or
+        "Mode - " .. connection_data.mode
+      ),
       info = "Select the mode of the connection.",
       size = 2,
       object = "selection_box",
@@ -348,9 +388,6 @@ local function _connections_edit_impl(connection_data)
       increment_on_enter = true
     }
   }
-
-  local cached_peripheral_list = get_peripherals()
-  local expanded_section = 1
 
   local function save_connection()
     local ok, err = verify_connection(connection_data)
@@ -457,8 +494,10 @@ local function _connections_edit_impl(connection_data)
         if keys_held[keys.leftShift] then
           expanded_section = expanded_section - 1
           if expanded_section < 1 then
-            return -- exit, not saving any data.
-            ---@fixme Add a confirmation prompt here.
+            if confirm_exit_no_save() then
+              return
+            end
+            expanded_section = 1
           end
         else
           expanded_section = expanded_section + 1
@@ -503,7 +542,7 @@ local function _connections_edit_impl(connection_data)
       elseif event == "select-filter_mode" then
         connection_data.filter_mode = selection == 1 and "blacklist" or "whitelist"
 
-        section_info.name = "Filter Mode - " .. result
+        section_info.name = "Filter Mode - " .. connection_data.filter_mode
       elseif event == "select-mode" then
         connection_data.mode = selection == 1 and "1234" or "split"
 
@@ -532,7 +571,56 @@ local function connections_add_menu()
 end
 
 local function connections_edit_menu()
+  --[[
+    ######################################################
+    # Edit Connection                                    #
+    # Press enter to edit a connection.                  #
+    # Press backspace to exit.                           #
+    ######################################################
+    ######################################################
+    # > connection_1                                     #
+    #   connection_2                                     #
+    #   connection_3                                     #
+    #   ...                                              #
+    #   ...                                              #
+    ######################################################
+  ]]
 
+  local win = window.create(term.current(), 1, 1, term.getSize())
+  local width, height = win.getSize()
+
+  while true do
+    PrimeUI.clear()
+
+    -- Draw info box.
+    info_box(win, "Edit Connection", "Press enter to edit a connection.\nPress backspace to exit.", 2)
+
+    local connection_list = {}
+    for i, v in ipairs(connections) do
+      connection_list[i] = v.name
+    end
+
+    if #connection_list == 0 then
+      connection_list = { "No connections" }
+    end
+
+    outlined_selection_box(win, 3, 7, width - 4, 12, connection_list, "edit", nil, colors.white, colors.black, 1, 1)
+    PrimeUI.textBox(win, 3, 6, 13, 1, " Connections ", colors.purple)
+
+    PrimeUI.keyAction(keys.backspace, "exit")
+
+    local object, event, selected, selection = PrimeUI.run()
+
+    if object == "selectionBox" then
+      if event == "edit" then
+        parallel.waitForAny(key_listener, function()
+          _connections_edit_impl(connections[selection])
+        end)
+      end
+    elseif object == "keyAction" and event == "exit" then
+      return
+    end
+  end
 end
 
 local function connections_remove_menu()
