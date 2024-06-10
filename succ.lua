@@ -441,11 +441,11 @@ local function _connections_filter_edit_impl(connection_data)
             if item_selected < item_scroll then
               item_scroll = item_selected
             end
-          elseif not items[selection] then
-            -- Nothing to remove, so just go back.
-            selected = nil
-            reset_scroller()
           end
+          -- Exit the selection mode
+          selected = nil
+          reset_scroller()
+
           -- Restart the timer, since we did something that may take longer than 0.5 secs
           timer = os.startTimer(0.5)
         end
