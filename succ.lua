@@ -944,10 +944,6 @@ local function connections_main_menu()
   end
 end
 
-local function list_menu()
-  unacceptable("error", "This feature is not yet implemented.")
-end
-
 local function tickrate_menu()
   --[[
     ######################################################
@@ -1102,7 +1098,6 @@ end
 --- Main menu
 local function main_menu()
   local update_connections = "Update Connections"
-  local whitelist_blacklist = "Change Connection Whitelists/Blacklists"
   local update_rate = "Change Update Rate"
   local nickname = "Change Peripheral Nicknames"
   local toggle = "Toggle Running"
@@ -1128,7 +1123,6 @@ local function main_menu()
   -- Create the selection box.
   outlined_selection_box(win, 4, 13, width - 6, height - 13, {
     update_connections,
-    whitelist_blacklist,
     update_rate,
     nickname,
     toggle,
@@ -1139,8 +1133,6 @@ local function main_menu()
 
   if selected == update_connections then
     connections_main_menu()
-  elseif selected == whitelist_blacklist then
-    list_menu()
   elseif selected == update_rate then
     tickrate_menu()
   elseif selected == nickname then
