@@ -322,6 +322,8 @@ local function _connections_filter_edit_impl(connection_data)
 
   local timer = os.startTimer(0.5)
 
+  local no_items_toggle = true
+
   while true do
     PrimeUI.clear()
 
@@ -362,7 +364,7 @@ local function _connections_filter_edit_impl(connection_data)
       win,
       3, items_y,
       width - 4, items_height,
-      #items == 0 and { "No items" } or items,
+      #items == 0 and { no_items_toggle and "No items" or "" } or items,
       "select-item", "select-item-change",
       enable_selector and colors.white or colors.gray, colors.black,
       item_selected, item_scroll,
@@ -382,6 +384,7 @@ local function _connections_filter_edit_impl(connection_data)
           local _, timer_id = os.pullEvent("timer")
         until timer_id == timer
 
+        no_items_toggle = not no_items_toggle
         PrimeUI.resolve("scroller")
       end)
 
@@ -391,6 +394,14 @@ local function _connections_filter_edit_impl(connection_data)
 
 
     local object, event, result, selection, scroll_result = PrimeUI.run()
+
+    local function reset_scroller()
+      scroll_direction = 0
+      next_scroll_direction = 1
+      scroll_edge_pause = 5
+      item_scroll = 1
+      item_selected = -1
+    end
 
     if object == "selectionBox" then
       if event == "select-change" then
@@ -418,7 +429,7 @@ local function _connections_filter_edit_impl(connection_data)
         end
       elseif event == "select-item" then
         if selected == "remove" then
-          if confirmation_menu("Remove Item", "Are you sure you want to remove item " .. tostring(items[selection]) .. "?") then
+          if items[selection] and confirmation_menu("Remove item", "Are you sure you want to remove item " .. tostring(items[selection]) .. "?") then
             table.remove(items, selection)
             item_count = item_count - 1
 
@@ -430,17 +441,21 @@ local function _connections_filter_edit_impl(connection_data)
             if item_selected < item_scroll then
               item_scroll = item_selected
             end
-
-            -- Restart the timer, since we did something that may take longer than 0.5 secs
-            timer = os.startTimer(0.5)
+          elseif not items[selection] then
+            -- Nothing to remove, so just go back.
+            selected = nil
+            reset_scroller()
           end
+          -- Restart the timer, since we did something that may take longer than 0.5 secs
+          timer = os.startTimer(0.5)
         end
       end
     elseif object == "scroller" then
       -- scroll the preview box
       timer = os.startTimer(0.5)
 
-      if not enable_selector then
+      if not enable_selector and item_count > items_height then
+
         item_scroll = item_scroll + scroll_direction
 
         if item_scroll < 1 then
@@ -466,11 +481,7 @@ local function _connections_filter_edit_impl(connection_data)
         -- <something> was selected, so go back to the "main" section, reverting
         -- data to defaults.
         selected = nil
-        item_scroll = 1
-        scroll_direction = 0
-        next_scroll_direction = 1
-        scroll_edge_pause = 5
-        item_selected = -1
+        reset_scroller()
       else
         save()
         return
@@ -483,11 +494,7 @@ local function _connections_filter_edit_impl(connection_data)
         end
 
         selected = nil
-        item_scroll = 1
-        scroll_direction = 0
-        next_scroll_direction = 1
-        scroll_edge_pause = 5
-        item_selected = -1
+        reset_scroller()
 
         -- Restart the timer, since we did something that may take longer than 0.5 secs
         timer = os.startTimer(0.5)
@@ -1065,7 +1072,7 @@ local function nickname_menu()
     term.setCursorBlink(editing)
 
     -- Run the UI
-    local object, event, selected, _scroll = PrimeUI.run()
+    local object, event, selected, _selection, _scroll = PrimeUI.run()
 
     if object == "keyAction" then
       if event == "exit" then
@@ -1076,7 +1083,7 @@ local function nickname_menu()
         -- Edit the nickname of the selected peripheral.
         editing = true
       elseif event == "change" then
-        index = selected
+        index = _selection
         scroll = _scroll
       end
     elseif object == "inputBox" then
@@ -1121,7 +1128,7 @@ local function main_menu()
   info_box(win, "Main Menu", description, 7)
 
   -- Create the selection box.
-  outlined_selection_box(win, 4, 13, width - 6, height - 13, {
+  outlined_selection_box(win, 4, 14, width - 6, height - 14, {
     update_connections,
     update_rate,
     nickname,
