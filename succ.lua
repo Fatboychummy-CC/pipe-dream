@@ -53,8 +53,7 @@ end
 ---@field name string The name of the connection.
 ---@field from string The peripheral the connection is from.
 ---@field to string[] The peripherals the connection is to.
----@field whitelist string[] The whitelist of items.
----@field blacklist string[] The blacklist of items.
+---@field filter_list string[] The blacklist or whitelist of items.
 ---@field filter_mode "whitelist"|"blacklist" The item filter mode of the connection.
 ---@field mode "1234"|"split" The mode of the connection. 1234 means "push and fill 1, then 2, then 3, then 4". Split means "split input evenly between all outputs".
 ---@field moving boolean Whether the connection is active (moving items).
@@ -226,6 +225,10 @@ local function verify_connection(connection_data)
     return false, "Filter mode is not set or is invalid."
   end
 
+  if not connection_data.filter_list then
+    return false, "Filter list is not set."
+  end
+
   if not connection_data.mode or (connection_data.mode ~= "1234" and connection_data.mode ~= "split") then
     return false, "Mode is not set or is invalid."
   end
@@ -233,42 +236,270 @@ local function verify_connection(connection_data)
   return true, "Connection is valid, so you should not see this message. This is a bug if you do."
 end
 
---- Ask the user if they're sure they want to exit without saving.
+--- Confirmation menu with custom title and body.
+---@param title string The title of the menu.
+---@param body string The body of the menu.
+---@param select_yes_default boolean? Whether the default selection is "Yes".
 ---@return boolean sure Whether the user is sure they want to exit without saving.
-local function confirm_exit_no_save()
+local function confirmation_menu(title, body, select_yes_default)
   local win = window.create(term.current(), 1, 1, term.getSize())
   local width, height = win.getSize()
 
-  PrimeUI.clear()
+  while true do
+    PrimeUI.clear()
 
-  -- Draw info box.
-  info_box(win, "Exit Without Saving", "Are you sure you want to exit without saving?", 1)
+    -- Draw info box.
+    info_box(win, title, body, 2)
 
-  outlined_selection_box(win, 3, 7, width - 4, 2, {
-    "No",
-    "Yes"
-  }, "selection", nil, colors.white, colors.black, 1, 1)
+    outlined_selection_box(win, 3, 7, width - 4, 2, {
+      "Yes",
+      "No"
+    }, "selection", nil, colors.white, colors.black, select_yes_default and 1 or 2, 1)
 
-  local object, event, result = PrimeUI.run()
+    PrimeUI.keyAction(keys.backspace, "exit")
 
-  return result == "Yes"
+    local object, event, result = PrimeUI.run()
+
+    if object == "selectionBox" then
+      if event == "selection" then
+        return result == "Yes"
+      end
+    elseif object == "keyAction" and event == "exit" then
+      return false
+    end
+  end
+end
+
+--- Ask the user if they're sure they want to exit without saving.
+---@return boolean sure Whether the user is sure they want to exit without saving.
+local function confirm_exit_no_save()
+  return confirmation_menu("Exit Without Saving", "Are you sure you want to exit without saving?", false)
+end
+
+--- Implement the connection filter editing menu.
+---@param connection_data Connection The connection data to edit.
+local function _connections_filter_edit_impl(connection_data)
+  --[[
+    # Filter connectionname ##############################
+    # > Add item                                         # -- this box will turn into an info box if add/view/remove is selected
+    #   View items                                       #
+    #   Remove item                                      #
+    #   Toggle blacklist/whitelist                       #
+    ######################################################
+    # Filter blacklist ################################### -- or whitelist...
+    # minecraft:item_1                                   # -- If possible, the filter preview should scroll up and down if overfull
+    # minecraft:item_2                                   # -- I believe we can use PrimeUI.addTask to do this, just have something
+    # ...                                                # -- resolve PrimeUI after half a second or so?
+    ######################################################
+  ]]
+
+  local win = window.create(term.current(), 1, 1, term.getSize())
+  local width, height = win.getSize()
+
+  local items = connection_data.filter_list
+  local item_count = #items
+
+  ---@type "add"|"view"|"remove"|nil The selected action.
+  local selected
+
+  ---@type integer, integer The selected item in the preview box. Will be set to -1 unless it is active.
+  local item_selected, item_scroll = -1, 1
+
+  local items_y, items_height = 9, 10
+
+  ---@type integer, integer For the main selection box.
+  local main_selected, main_scroll = 1, 1
+
+  ---@type integer When at either "edge" of the list, pause for this many iterations before reversing direction.
+  local scroll_edge_pause = 5
+
+  ---@type 1|0|-1 The direction to scroll in.
+  local scroll_direction = 0
+  ---@type 1|-1 The direction to swap to scrolling after the edge pause.
+  local next_scroll_direction = 1
+
+  local add_item, view_items, remove_item, toggle_mode, go_back = "Add item", "View items", "Remove item", "Toggle blacklist/whitelist", "Save and exit"
+
+  local timer = os.startTimer(0.5)
+
+  while true do
+    PrimeUI.clear()
+
+    -- If we've selected something, we can draw the info box for it.
+    if selected == "add" then
+      info_box(win, "Add item", "Enter the name of the item to add to the filter list, then press enter to confirm.", 2)
+      outlined_input_box(win, 3, 7, width - 4, "add-item", colors.white, colors.black)
+      PrimeUI.textBox(win, 3, 6, 11, 1, " Item Name ", colors.purple)
+
+      items_y = 10
+      items_height = 9
+    elseif selected == "view" then
+      info_box(win, "View items", "Press backspace to go back.", 1)
+      items_y = 6
+      items_height = 13
+    elseif selected == "remove" then
+      info_box(win, "Remove item", "Select the item to remove from the filter list.", 1)
+      items_y = 6
+      items_height = 13
+    else
+      items_y = 10
+      items_height = 9
+
+      -- No info box, just put the selection box in.
+      outlined_selection_box(win, 3, 3, width - 4, 5, {
+        add_item,
+        view_items,
+        remove_item,
+        toggle_mode,
+        go_back
+      }, "select", "select-change", colors.white, colors.black, main_selected, main_scroll)
+      PrimeUI.textBox(win, 3, 2, 11 + #connection_data.name, 1, " Filter - " .. connection_data.name, colors.purple)
+    end
+
+    local enable_selector = selected == "view" or selected == "remove"
+    -- Draw the preview selection box
+    outlined_selection_box(
+      win,
+      3, items_y,
+      width - 4, items_height,
+      #items == 0 and { "No items" } or items,
+      "select-item", "select-item-change",
+      enable_selector and colors.white or colors.gray, colors.black,
+      item_selected, item_scroll,
+      not enable_selector
+    )
+    PrimeUI.textBox(
+      win,
+      3, items_y - 1,
+      2 + #connection_data.filter_mode, 1,
+      ' ' .. connection_data.filter_mode .. ' ',
+      enable_selector and colors.purple or colors.gray
+    )
+
+    if selected ~= "add" then -- Add stops working due to read implementation
+      PrimeUI.addTask(function()
+        repeat
+          local _, timer_id = os.pullEvent("timer")
+        until timer_id == timer
+
+        PrimeUI.resolve("scroller")
+      end)
+
+      -- Read needs backspace, so we only activate it if not in add mode.
+      PrimeUI.keyAction(keys.backspace, "exit")
+    end
+
+
+    local object, event, result, selection, scroll_result = PrimeUI.run()
+
+    if object == "selectionBox" then
+      if event == "select-change" then
+        main_selected = selection
+        main_scroll = scroll_result
+      elseif event == "select-item-change" then
+        item_selected = selection
+        item_scroll = scroll_result
+      elseif event == "select" then
+        if result == add_item then
+          selected = "add"
+        elseif result == view_items then
+          selected = "view"
+          item_selected = 1
+          item_scroll = 1
+        elseif result == remove_item then
+          selected = "remove"
+          item_selected = 1
+          item_scroll = 1
+        elseif result == toggle_mode then
+          connection_data.filter_mode = connection_data.filter_mode == "whitelist" and "blacklist" or "whitelist"
+        elseif result == go_back then
+          save()
+          return
+        end
+      elseif event == "select-item" then
+        if selected == "remove" then
+          if confirmation_menu("Remove Item", "Are you sure you want to remove item " .. tostring(items[selection]) .. "?") then
+            table.remove(items, selection)
+            item_count = item_count - 1
+
+            -- Offset the selected item, since we just removed one.
+            item_selected = item_selected - 1
+            if item_selected < 1 then
+              item_selected = 1
+            end
+            if item_selected < item_scroll then
+              item_scroll = item_selected
+            end
+
+            -- Restart the timer, since we did something that may take longer than 0.5 secs
+            timer = os.startTimer(0.5)
+          end
+        end
+      end
+    elseif object == "scroller" then
+      -- scroll the preview box
+      timer = os.startTimer(0.5)
+
+      if not enable_selector then
+        item_scroll = item_scroll + scroll_direction
+
+        if item_scroll < 1 then
+          item_scroll = 1
+          scroll_direction = 0
+          next_scroll_direction = 1
+          scroll_edge_pause = 5
+        elseif item_scroll > item_count - items_height + 1 then
+          item_scroll = item_count - items_height + 1
+          scroll_direction = 0
+          next_scroll_direction = -1
+          scroll_edge_pause = 5
+        end
+
+        if scroll_edge_pause > 0 then
+          scroll_edge_pause = scroll_edge_pause - 1
+        else
+          scroll_direction = next_scroll_direction
+        end
+      end
+    elseif object == "keyAction" and event == "exit" then
+      if selected then
+        -- <something> was selected, so go back to the "main" section, reverting
+        -- data to defaults.
+        selected = nil
+        item_scroll = 1
+        scroll_direction = 0
+        next_scroll_direction = 1
+        scroll_edge_pause = 5
+        item_selected = -1
+      else
+        save()
+        return
+      end
+    elseif object == "inputBox" then
+      if event == "add-item" then
+        if result and result ~= "" then
+          table.insert(connection_data.filter_list, result)
+          item_count = item_count + 1
+        end
+
+        selected = nil
+        item_scroll = 1
+        scroll_direction = 0
+        next_scroll_direction = 1
+        scroll_edge_pause = 5
+        item_selected = -1
+
+        -- Restart the timer, since we did something that may take longer than 0.5 secs
+        timer = os.startTimer(0.5)
+      end
+    end
+  end
 end
 
 --- Implement the connection editing menu.
 ---@param connection_data Connection? The connection data to edit.
 local function _connections_edit_impl(connection_data)
   --[[
-    ---@class Connection
-    ---@field name string The name of the connection.
-    ---@field from string The peripheral the connection is from.
-    ---@field to string[] The peripherals the connection is to.
-    ---@field whitelist string[] The whitelist of items.
-    ---@field blacklist string[] The blacklist of items.
-    ---@field filter_mode "whitelist"|"blacklist" The mode of the connection.
-    ---@field mode "1234"|"split" The mode of the connection. 1234 means "push and fill 1, then 2, then 3, then 4". Split means "split input evenly between all outputs".
-    ---@field moving boolean Whether the connection is active (moving items).
-
-
     # Add Connection ##################################### -- Sections will expand/contract as needed.
     # Enter the name of this connection                  # -- Info box will change depending on expanded section.
     # Press enter when done.                             #
@@ -302,8 +533,7 @@ local function _connections_edit_impl(connection_data)
     name = "",
     from = "",
     to = {},
-    whitelist = {},
-    blacklist = {},
+    filter_list = {},
     filter_mode = "blacklist",
     mode = "1234",
     moving = false, -- New connections will be disabled by default
@@ -570,26 +800,16 @@ local function _connections_edit_impl(connection_data)
   end
 end
 
+--- Menu to add a new connection.
 local function connections_add_menu()
   parallel.waitForAny(key_listener, _connections_edit_impl)
 end
 
-local function connections_edit_menu()
-  --[[
-    ######################################################
-    # Edit Connection                                    #
-    # Press enter to edit a connection.                  #
-    # Press backspace to exit.                           #
-    ######################################################
-    ######################################################
-    # > connection_1                                     #
-    #   connection_2                                     #
-    #   connection_3                                     #
-    #   ...                                              #
-    #   ...                                              #
-    ######################################################
-  ]]
-
+--- A quick menu to select a connection, with a custom header.
+---@param title string The title of the menu.
+---@param body string The body of the menu.
+---@return Connection? connection The connection selected, or nil if none was selected.
+local function select_connection(title, body)
   local win = window.create(term.current(), 1, 1, term.getSize())
   local width, height = win.getSize()
 
@@ -597,7 +817,7 @@ local function connections_edit_menu()
     PrimeUI.clear()
 
     -- Draw info box.
-    info_box(win, "Edit Connection", "Press enter to edit a connection.\nPress backspace to exit.", 2)
+    info_box(win, title, body, 2)
 
     local connection_list = {}
     for i, v in ipairs(connections) do
@@ -617,9 +837,7 @@ local function connections_edit_menu()
 
     if object == "selectionBox" then
       if event == "edit" then
-        parallel.waitForAny(key_listener, function()
-          _connections_edit_impl(connections[selection])
-        end)
+        return connections[selection]
       end
     elseif object == "keyAction" and event == "exit" then
       return
@@ -627,8 +845,39 @@ local function connections_edit_menu()
   end
 end
 
-local function connections_remove_menu()
+--- Edit a connection
+local function connections_edit_menu()
+  local connection = select_connection("Edit Connection", "Press enter to edit a connection.\nPress backspace to exit.")
 
+  if connection then
+    parallel.waitForAny(key_listener, function()
+      _connections_edit_impl(connection)
+    end)
+  end
+end
+
+--- Edit whitelist/blacklist of a connection
+local function connections_filter_menu()
+  local connection = select_connection("Edit Connection Filter", "Press enter to edit a connection's filter.\nPress backspace to exit.")
+
+  if connection then
+    parallel.waitForAny(key_listener, function()
+      _connections_filter_edit_impl(connection)
+    end)
+  end
+end
+
+local function connections_remove_menu()
+  local connection = select_connection("Remove Connection", "Press enter to remove a connection.\nPress backspace to exit.")
+
+  if connection and confirmation_menu("Remove Connection", "Are you sure you want to remove connection " .. tostring(connection.name) .. "?") then
+    for i, v in ipairs(connections) do
+      if v == connection then
+        table.remove(connections, i)
+        return
+      end
+    end
+  end
 end
 
 --- Connections menu
@@ -658,13 +907,15 @@ local function connections_main_menu()
 
     local add_connection = "Add Connection"
     local edit_connection = "Edit Connection"
+    local filter_connection = "Edit Connection Filter"
     local remove_connection = "Remove Connection"
     local go_back = "Go Back"
 
     -- Draw the selection box.
-    outlined_selection_box(win, 3, 6, width - 4, 4, {
+    outlined_selection_box(win, 3, 6, width - 4, 5, {
       add_connection,
       edit_connection,
+      filter_connection,
       remove_connection,
       go_back
     }, "selection", nil, colors.white, colors.black, 1, 1)
@@ -678,11 +929,15 @@ local function connections_main_menu()
         connections_add_menu()
       elseif selected == edit_connection then
         connections_edit_menu()
+      elseif selected == filter_connection then
+        connections_filter_menu()
       elseif selected == remove_connection then
         connections_remove_menu()
       elseif selected == go_back then
         return
       end
+
+      save()
     elseif object == "keyAction" and event == "exit" then
       return
     end
