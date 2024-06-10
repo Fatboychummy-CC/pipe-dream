@@ -166,7 +166,7 @@ function PrimeUI.selectionBox(win, x, y, width, height, entries, action, selectC
                     selection = selection + 1
                     if selection > scroll + height - 1 then scroll = scroll + 1 end
                     -- Send action if necessary.
-                    if type(selectChangeAction) == "string" then PrimeUI.resolve("selectionBox", selectChangeAction, selection)
+                    if type(selectChangeAction) == "string" then PrimeUI.resolve("selectionBox", selectChangeAction, entries[selection], selection, scroll)
                     elseif selectChangeAction then selectChangeAction(selection, scroll) end
                     -- Redraw screen.
                     drawEntries()
@@ -175,7 +175,7 @@ function PrimeUI.selectionBox(win, x, y, width, height, entries, action, selectC
                     selection = selection - 1
                     if selection < scroll then scroll = scroll - 1 end
                     -- Send action if necessary.
-                    if type(selectChangeAction) == "string" then PrimeUI.resolve("selectionBox", selectChangeAction, selection)
+                    if type(selectChangeAction) == "string" then PrimeUI.resolve("selectionBox", selectChangeAction, entries[selection], selection, scroll)
                     elseif selectChangeAction then selectChangeAction(selection, scroll) end
                     -- Redraw screen.
                     drawEntries()
