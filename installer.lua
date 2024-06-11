@@ -1,12 +1,12 @@
 --- Simple program to be used as an installer script. Copy to repos and insert what is needed.
 
 local to_get = {
-  "extern:primeui.lua:https://raw.githubusercontent.com/Fatboychummy-CC/the-good-succ/main/primeui.lua",
-  "extern:succ.lua:https://raw.githubusercontent.com/Fatboychummy-CC/the-good-succ/main/succ.lua",
-  "extern:startup.lua:https://raw.githubusercontent.com/Fatboychummy-CC/the-good-succ/main/succ.lua",
+  "extern:primeui.lua:https://raw.githubusercontent.com/Fatboychummy-CC/pipe-dream/main/primeui.lua",
+  "extern:succ.lua:https://raw.githubusercontent.com/Fatboychummy-CC/pipe-dream/main/pipe_dream.lua",
+  "extern:startup.lua:https://raw.githubusercontent.com/Fatboychummy-CC/pipe-dream/main/pipe_dream.lua",
   "L:file_helper.lua:file_helper.lua",
 }
-local program_name = "The Good Succ"
+local program_name = "Pipe Dream"
 local pinestore_id = 89 -- Set this to the ID of the pinestore project if you wish to note to pinestore that a download has occurred.
 
 
