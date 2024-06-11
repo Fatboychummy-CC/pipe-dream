@@ -3,14 +3,12 @@ local PrimeUI = require("primeui")
 local file_helper = require "file_helper"
 local data_dir = file_helper:instanced("data")
 
-local LISTS_FILE = "lists.txt"
 local NICKNAMES_FILE = "nicknames.txt"
 local ITEMS_MOVED_FILE = "items_moved.txt"
 local CONNECTIONS_FILE = "connections.txt"
 local UPDATE_TICKRATE_FILE = "update_tickrate.txt"
 local MOVING_ITEMS_FILE = "moving_items.txt"
 
-local lists = data_dir:unserialize(LISTS_FILE, {})
 local nicknames = data_dir:unserialize(NICKNAMES_FILE, {})
 local items_moved = data_dir:unserialize(ITEMS_MOVED_FILE, 0)
 local connections = data_dir:unserialize(CONNECTIONS_FILE, {})
@@ -18,7 +16,6 @@ local moving_items = data_dir:unserialize(MOVING_ITEMS_FILE, true)
 local update_tickrate = data_dir:unserialize(UPDATE_TICKRATE_FILE, 10)
 
 local function save()
-  data_dir:serialize(LISTS_FILE, lists)
   data_dir:serialize(NICKNAMES_FILE, nicknames)
   data_dir:serialize(ITEMS_MOVED_FILE, items_moved)
   data_dir:serialize(CONNECTIONS_FILE, connections)
@@ -57,13 +54,6 @@ end
 ---@field filter_mode "whitelist"|"blacklist" The item filter mode of the connection.
 ---@field mode "1234"|"split" The mode of the connection. 1234 means "push and fill 1, then 2, then 3, then 4". Split means "split input evenly between all outputs".
 ---@field moving boolean Whether the connection is active (moving items).
-
--- We are also not fine if this value fails to load, as it will break the program.
-if type(lists) ~= "table" then
-  error("Lists file might be corrupted, please check it for errors. Cannot read it currently.", 0)
-end
----@cast lists table<string, string[]> -- lists[peripheral_name] = { "whitelist"/"blacklist", item_1, item_2, ... }
--- Default for all connections is blacklist with no items.
 
 local function count_table(tbl)
   local count = 0
@@ -536,7 +526,7 @@ local function _connections_edit_impl(connection_data)
     # Split evenly                                       #
     ######################################################
   ]]
-  connection_data = connection_data or {
+  local _connection_data = {
     name = "",
     from = "",
     to = {},
@@ -544,7 +534,20 @@ local function _connections_edit_impl(connection_data)
     filter_mode = "blacklist",
     mode = "1234",
     moving = false, -- New connections will be disabled by default
+    id = os.epoch("utc")
   }
+  if connection_data then
+    _connection_data.name = connection_data.name or _connection_data.name
+    _connection_data.from = connection_data.from or _connection_data.from
+    _connection_data.to = connection_data.to or _connection_data.to
+    _connection_data.filter_list = connection_data.filter_list or _connection_data.filter_list
+    _connection_data.filter_mode = connection_data.filter_mode or _connection_data.filter_mode
+    _connection_data.mode = connection_data.mode or _connection_data.mode
+    _connection_data.moving = connection_data.moving or _connection_data.moving
+    _connection_data.id = connection_data.id or _connection_data.id
+  end
+
+
   local cached_peripheral_list = get_peripherals()
   local expanded_section = 1
 
@@ -558,23 +561,23 @@ local function _connections_edit_impl(connection_data)
   local section_infos = {
     {
       name = (
-        (connection_data.name == "") and "Name" or
-        "Name - " .. connection_data.name
+        (_connection_data.name == "") and "Name" or
+        "Name - " .. _connection_data.name
       ),
       info =
       "Enter the name of this connection\nPress enter to save section data, tab to go to the next step, and shift+tab to go back.",
       size = 1,
       object = "input_box",
       args = {
-        default = connection_data.name,
+        default = _connection_data.name,
         action = "set-name",
       },
       increment_on_enter = true
     },
     {
       name = (
-        (connection_data.from == "") and "Origin" or
-        "Origin - " .. (nicknames[connection_data.from] or connection_data.from)
+        (_connection_data.from == "") and "Origin" or
+        "Origin - " .. (nicknames[_connection_data.from] or _connection_data.from)
       ),
       info = "Select the peripheral this connection is from.",
       size = 7,
@@ -587,8 +590,8 @@ local function _connections_edit_impl(connection_data)
     },
     {
       name = (
-        (#connection_data.to == 0) and "Destinations" or
-        "Destinations - " .. (#connection_data.to) .. " selected"
+        (#_connection_data.to == 0) and "Destinations" or
+        "Destinations - " .. (#_connection_data.to) .. " selected"
       ),
       info = "Select the peripherals this connection is to.",
       size = 7,
@@ -601,8 +604,8 @@ local function _connections_edit_impl(connection_data)
     },
     {
       name = (
-        (connection_data.filter_mode == "") and "Filter Mode" or
-        "Filter Mode - " .. connection_data.filter_mode
+        (_connection_data.filter_mode == "") and "Filter Mode" or
+        "Filter Mode - " .. _connection_data.filter_mode
       ),
       info = "Select the filter mode of the connection. The list starts empty, and you can edit it in another menu.",
       size = 2,
@@ -615,8 +618,8 @@ local function _connections_edit_impl(connection_data)
     },
     {
       name = (
-        (connection_data.mode == "") and "Mode" or
-        "Mode - " .. connection_data.mode
+        (_connection_data.mode == "") and "Mode" or
+        "Mode - " .. _connection_data.mode
       ),
       info = "Select the mode of the connection.",
       size = 2,
@@ -630,9 +633,22 @@ local function _connections_edit_impl(connection_data)
   }
 
   local function save_connection()
-    local ok, err = verify_connection(connection_data)
+    local ok, err = verify_connection(_connection_data)
     if ok then
-      table.insert(connections, connection_data)
+      -- Search the connections list for a connection with this ID.
+      for i, v in ipairs(connections) do
+        if v.id == _connection_data.id then
+          connections[i] = _connection_data
+          save()
+          return true
+        end
+      end
+
+      -- If we made it here, we didn't find the connection in the list.
+      -- Thus, this must be a new connection.
+      -- We can just insert it into the list.
+      table.insert(connections, _connection_data)
+
       return true
     else
       unacceptable("input", "Connection data is malformed or incorrect: " .. tostring(err))
@@ -665,8 +681,8 @@ local function _connections_edit_impl(connection_data)
       periphs_with_nicknames[i] = nicknames[v] or v -- we can just outright add the nicknames here for this table.
       local found = false
 
-      for j = 1, #connection_data.to do
-        if connection_data.to[j] == v then
+      for j = 1, #_connection_data.to do
+        if _connection_data.to[j] == v then
           destination_periphs_with_nicknames[i] = j .. ". " .. periphs_with_nicknames[i]
           found = true
           break
@@ -753,16 +769,16 @@ local function _connections_edit_impl(connection_data)
       end
     elseif object == "selectionBox" then
       if event == "select-origin" then
-        connection_data.from = cached_peripheral_list[selection]
+        _connection_data.from = cached_peripheral_list[selection]
         section_info.name = "Origin - " .. result
       elseif event == "select-destination" then
         -- Insert the peripheral into the list of destinations.
         -- Unless it is already in the list, in which case remove it.
         local found = false
 
-        for i = 1, #connection_data.to do
-          if connection_data.to[i] == cached_peripheral_list[selection] then
-            table.remove(connection_data.to, i)
+        for i = 1, #_connection_data.to do
+          if _connection_data.to[i] == cached_peripheral_list[selection] then
+            table.remove(_connection_data.to, i)
             found = true
             break
           end
@@ -772,22 +788,22 @@ local function _connections_edit_impl(connection_data)
         section_info.args.scroll = scroll_result
 
         if not found then
-          table.insert(connection_data.to, cached_peripheral_list[selection])
+          table.insert(_connection_data.to, cached_peripheral_list[selection])
         end
 
-        if #connection_data.to == 0 then
+        if #_connection_data.to == 0 then
           section_info.name = "Destinations"
         else
-          section_info.name = "Destinations - " .. (#connection_data.to) .. " selected"
+          section_info.name = "Destinations - " .. (#_connection_data.to) .. " selected"
         end
       elseif event == "select-filter_mode" then
-        connection_data.filter_mode = selection == 1 and "blacklist" or "whitelist"
+        _connection_data.filter_mode = selection == 1 and "blacklist" or "whitelist"
 
-        section_info.name = "Filter Mode - " .. connection_data.filter_mode
+        section_info.name = "Filter Mode - " .. _connection_data.filter_mode
       elseif event == "select-mode" then
-        connection_data.mode = selection == 1 and "1234" or "split"
+        _connection_data.mode = selection == 1 and "1234" or "split"
 
-        section_info.name = "Mode - " .. connection_data.mode
+        section_info.name = "Mode - " .. _connection_data.mode
       end
 
       if section_info.increment_on_enter then
@@ -795,7 +811,7 @@ local function _connections_edit_impl(connection_data)
       end
     elseif object == "inputBox" then
       if event == "set-name" then
-        connection_data.name = result
+        _connection_data.name = result
         section_info.args.default = result
         section_info.name = "Name - " .. result
       end
