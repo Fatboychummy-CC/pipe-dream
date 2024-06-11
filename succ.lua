@@ -55,14 +55,6 @@ end
 ---@field mode "1234"|"split" The mode of the connection. 1234 means "push and fill 1, then 2, then 3, then 4". Split means "split input evenly between all outputs".
 ---@field moving boolean Whether the connection is active (moving items).
 
-local function count_table(tbl)
-  local count = 0
-  for _ in pairs(tbl) do
-    count = count + 1
-  end
-  return count
-end
-
 --- Create an information box.
 ---@param win Window The window to draw the box on.
 ---@param title string The title of the box.
