@@ -2,6 +2,9 @@ local PrimeUI = require("primeui")
 
 local file_helper = require "file_helper"
 local data_dir = file_helper:instanced("data")
+local logging = require "logging"
+
+local log = logging.create_context("pipe_dream")
 
 local NICKNAMES_FILE = "nicknames.txt"
 local ITEMS_MOVED_FILE = "items_moved.txt"
@@ -14,6 +17,7 @@ local items_moved = data_dir:unserialize(ITEMS_MOVED_FILE, 0)
 local connections = data_dir:unserialize(CONNECTIONS_FILE, {})
 local moving_items = data_dir:unserialize(MOVING_ITEMS_FILE, true)
 local update_tickrate = data_dir:unserialize(UPDATE_TICKRATE_FILE, 10)
+log.info("Loaded data (or created defaults).")
 
 local function save()
   data_dir:serialize(NICKNAMES_FILE, nicknames)
@@ -21,23 +25,27 @@ local function save()
   data_dir:serialize(CONNECTIONS_FILE, connections)
   data_dir:serialize(MOVING_ITEMS_FILE, moving_items)
   data_dir:serialize(UPDATE_TICKRATE_FILE, update_tickrate)
+  log.info("Saved data.")
 end
 
 -- We are fine if this value fails to load, as it will not break the program.
 if type(items_moved) ~= "number" then
   items_moved = 0
+  log.warn("Items moved file is corrupted, resetting to 0.")
 end
 ---@cast items_moved number
 
 -- We are also fine if this value fails to load, as it will not break the program.
 if type(update_tickrate) ~= "number" then
   update_tickrate = 10
+  log.warn("Update tickrate file is corrupted, resetting to 10.")
 end
 ---@cast update_tickrate number
 
 -- We are also also fine if this value fails to load, as it will not break the program.
 if type(nicknames) ~= "table" then
   nicknames = {}
+  log.warn("Nicknames file is corrupted, resetting to empty table.")
 end
 
 -- We are not fine if this value fails to load, as it will break the program.
@@ -150,6 +158,8 @@ end
 ---@param reason string The reason for the error.
 local function unacceptable(_type, reason)
   local win = window.create(term.current(), 1, 1, term.getSize())
+
+  log.warn("Unacceptable :", _type, ":", reason)
 
   PrimeUI.clear()
 
@@ -275,6 +285,8 @@ local function _connections_filter_edit_impl(connection_data)
     ######################################################
   ]]
 
+  log.debug("Editing filter for connection", connection_data.name)
+
   local win = window.create(term.current(), 1, 1, term.getSize())
   local width, height = win.getSize()
 
@@ -395,23 +407,31 @@ local function _connections_filter_edit_impl(connection_data)
       elseif event == "select" then
         if result == add_item then
           selected = "add"
+          log.debug("Selected add item")
         elseif result == view_items then
           selected = "view"
           item_selected = 1
           item_scroll = 1
+          log.debug("Selected view items")
         elseif result == remove_item then
           selected = "remove"
           item_selected = 1
           item_scroll = 1
+          log.debug("Selected remove item")
         elseif result == toggle_mode then
           connection_data.filter_mode = connection_data.filter_mode == "whitelist" and "blacklist" or "whitelist"
+          log.debug("Toggled filter mode to", connection_data.filter_mode)
         elseif result == go_back then
           save()
+
+          log.debug("Exiting filter edit for connection", connection_data.name)
           return
         end
       elseif event == "select-item" then
         if selected == "remove" then
           if items[selection] and confirmation_menu("Remove item", "Are you sure you want to remove item " .. tostring(items[selection]) .. "?") then
+            log.debug("Remove item", items[selection], "from filter list for connection", connection_data.name)
+
             table.remove(items, selection)
             item_count = item_count - 1
 
@@ -473,6 +493,9 @@ local function _connections_filter_edit_impl(connection_data)
         if result and result ~= "" then
           table.insert(connection_data.filter_list, result)
           item_count = item_count + 1
+          log.debug("Added item", result, "to filter list for connection", connection_data.name)
+        elseif result == "" then
+          log.debug("Add empty item, ignored.")
         end
 
         selected = nil
@@ -537,6 +560,10 @@ local function _connections_edit_impl(connection_data)
     _connection_data.mode = connection_data.mode or _connection_data.mode
     _connection_data.moving = connection_data.moving or _connection_data.moving
     _connection_data.id = connection_data.id or _connection_data.id
+
+    log.debug("Editing connection", _connection_data.name)
+  else
+    log.debug("Creating new connection")
   end
 
 
@@ -741,17 +768,21 @@ local function _connections_edit_impl(connection_data)
     if object == "keyAction" then
       if event == "section_switch" then
         if keys_held[keys.leftShift] then
+          log.debug("Go back a section.")
           expanded_section = expanded_section - 1
           if expanded_section < 1 then
             if confirm_exit_no_save() then
+              log.debug("User confirmed exit without save.")
               return
             end
             expanded_section = 1
           end
         else
+          log.info("Advance a section.")
           expanded_section = expanded_section + 1
           if expanded_section > #section_infos then
             if save_connection() then
+              log.debug("Connection updated and saved, exiting this menu.")
               return
             end
 
@@ -763,6 +794,7 @@ local function _connections_edit_impl(connection_data)
       if event == "select-origin" then
         _connection_data.from = cached_peripheral_list[selection]
         section_info.name = "Origin - " .. result
+        log.debug("Selected origin", _connection_data.from)
       elseif event == "select-destination" then
         -- Insert the peripheral into the list of destinations.
         -- Unless it is already in the list, in which case remove it.
@@ -772,6 +804,7 @@ local function _connections_edit_impl(connection_data)
           if _connection_data.to[i] == cached_peripheral_list[selection] then
             table.remove(_connection_data.to, i)
             found = true
+            log.debug("Removed destination", cached_peripheral_list[selection])
             break
           end
         end
@@ -781,6 +814,7 @@ local function _connections_edit_impl(connection_data)
 
         if not found then
           table.insert(_connection_data.to, cached_peripheral_list[selection])
+          log.debug("Added destination", cached_peripheral_list[selection])
         end
 
         if #_connection_data.to == 0 then
@@ -792,10 +826,14 @@ local function _connections_edit_impl(connection_data)
         _connection_data.filter_mode = selection == 1 and "blacklist" or "whitelist"
 
         section_info.name = "Filter Mode - " .. _connection_data.filter_mode
+
+        log.debug("Selected filter mode", _connection_data.filter_mode)
       elseif event == "select-mode" then
         _connection_data.mode = selection == 1 and "1234" or "split"
 
         section_info.name = "Mode - " .. _connection_data.mode
+
+        log.debug("Selected mode", _connection_data.mode)
       end
 
       if section_info.increment_on_enter then
@@ -806,6 +844,8 @@ local function _connections_edit_impl(connection_data)
         _connection_data.name = result
         section_info.args.default = result
         section_info.name = "Name - " .. result
+
+        log.debug("Set name to", result)
       end
 
       if section_info.increment_on_enter then
@@ -817,6 +857,7 @@ end
 
 --- Menu to add a new connection.
 local function connections_add_menu()
+  log.debug("Add connection")
   parallel.waitForAny(key_listener, _connections_edit_impl)
 end
 
@@ -827,6 +868,8 @@ end
 local function select_connection(title, body)
   local win = window.create(term.current(), 1, 1, term.getSize())
   local width, height = win.getSize()
+
+  log.debug("Select a connection")
 
   while true do
     PrimeUI.clear()
@@ -852,9 +895,11 @@ local function select_connection(title, body)
 
     if object == "selectionBox" then
       if event == "edit" then
+        log.debug("Selected connection", selection, "(", selected, ")")
         return connections[selection]
       end
     elseif object == "keyAction" and event == "exit" then
+      log.debug("Exit connection selection.")
       return
     end
   end
@@ -862,6 +907,7 @@ end
 
 --- Edit a connection
 local function connections_edit_menu()
+  log.debug("Edit connection")
   local connection = select_connection("Edit Connection", "Press enter to edit a connection.\nPress backspace to exit.")
 
   if connection then
@@ -873,6 +919,7 @@ end
 
 --- Edit whitelist/blacklist of a connection
 local function connections_filter_menu()
+  log.debug("Edit connection filter")
   local connection = select_connection("Edit Connection Filter", "Press enter to edit a connection's filter.\nPress backspace to exit.")
 
   if connection then
@@ -883,6 +930,7 @@ local function connections_filter_menu()
 end
 
 local function connections_remove_menu()
+  log.debug("Remove connection")
   local connection = select_connection("Remove Connection", "Press enter to remove a connection.\nPress backspace to exit.")
 
   if connection and confirmation_menu("Remove Connection", "Are you sure you want to remove connection " .. tostring(connection.name) .. "?") then
@@ -910,6 +958,7 @@ local function connections_main_menu()
     #   Go Back                                          # -- backspace will also work
     ######################################################
   ]]
+  log.debug("Connections menu")
 
   local win = window.create(term.current(), 1, 1, term.getSize())
   local width, height = win.getSize()
@@ -949,11 +998,15 @@ local function connections_main_menu()
       elseif selected == remove_connection then
         connections_remove_menu()
       elseif selected == go_back then
+        save()
+        log.debug("Exiting connections menu.")
         return
       end
 
       save()
     elseif object == "keyAction" and event == "exit" then
+      save()
+      log.debug("Exiting connections menu.")
       return
     end
   end
@@ -969,6 +1022,7 @@ local function tickrate_menu()
     # Updates every [  10] ticks                         #
     ######################################################
   ]]
+  log.debug("Update tickrate menu")
 
   local win = window.create(term.current(), 1, 1, term.getSize())
   local width, height = win.getSize()
@@ -1000,6 +1054,7 @@ local function tickrate_menu()
         unacceptable("input", "The input must be 1 or greater.")
       else
         update_tickrate = math.ceil(value) -- disallow decimals
+        log.debug("Set update tickrate to", update_tickrate)
       end
     end
   end
@@ -1022,6 +1077,7 @@ local function nickname_menu()
     # nickname nickname nickname nickname nickname       #
     ######################################################
   ]]
+  log.debug("Nickname menu")
 
   local run = true
   local index = 1
@@ -1085,11 +1141,13 @@ local function nickname_menu()
     if object == "keyAction" then
       if event == "exit" then
         run = false
+        log.debug("Exiting nickname menu.")
       end
     elseif object == "selectionBox" then
       if event == "edit" then
         -- Edit the nickname of the selected peripheral.
         editing = true
+        log.debug("Editing nickname for", selected)
       elseif event == "change" then
         index = _selection
         scroll = _scroll
@@ -1099,9 +1157,13 @@ local function nickname_menu()
         if selected == cached_peripheral_list[index] or selected == "" then
           -- Remove the nickname
           nicknames[cached_peripheral_list[index]] = nil
+
+          log.debug("Removed nickname for", cached_peripheral_list[index])
         else
           -- Set the nickname
           nicknames[cached_peripheral_list[index]] = selected
+
+          log.debug("Set nickname for", cached_peripheral_list[index], "to", selected)
         end
         editing = false
       end
@@ -1117,6 +1179,8 @@ local function main_menu()
   local nickname = "Change Peripheral Nicknames"
   local toggle = "Toggle Running"
   local exit = "Exit"
+
+  log.info("Start main menu")
 
   local description = ("Select an option from the list below.\n\nTotal items moved: %d\nTotal connections: %d\n\nUpdate rate: Every %d tick%s\nRunning: %s")
       :format(
@@ -1145,6 +1209,7 @@ local function main_menu()
   }, "selection", nil, colors.white, colors.black, 1, 1)
 
   local object, event, selected = PrimeUI.run()
+  log.debug("Selected", selected)
 
   if selected == update_connections then
     connections_main_menu()
@@ -1154,8 +1219,10 @@ local function main_menu()
     nickname_menu()
   elseif selected == toggle then
     moving_items = not moving_items
+    log.debug("Toggled running to", moving_items)
   elseif selected == exit then
-    print("Exiting...")
+    log.info("Exiting program")
+    save()
     return true
   end
 
