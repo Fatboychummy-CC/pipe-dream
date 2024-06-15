@@ -9,7 +9,7 @@ local log = logging.create_context("pipe_dream")
 local logging_win
 do
   local width, height = term.getSize()
-  logging_win = window.create(term.current(), 1, 1, width - 4, height - 8)
+  logging_win = window.create(term.current(), 3, 8, width - 4, height - 8)
   logging_win.setVisible(false)
   logging.set_window(logging_win)
 end
@@ -17,12 +17,14 @@ end
 local NICKNAMES_FILE = "nicknames.txt"
 local ITEMS_MOVED_FILE = "items_moved.txt"
 local CONNECTIONS_FILE = "connections.txt"
+local BUFFER_CHEST_FILE = "buffer_chest.txt"
 local MOVING_ITEMS_FILE = "moving_items.txt"
 local UPDATE_TICKRATE_FILE = "update_tickrate.txt"
 
 local nicknames = data_dir:unserialize(NICKNAMES_FILE, {})
 local items_moved = data_dir:unserialize(ITEMS_MOVED_FILE, 0)
 local connections = data_dir:unserialize(CONNECTIONS_FILE, {})
+local buffer_chest = data_dir:unserialize(BUFFER_CHEST_FILE, nil)
 local moving_items = data_dir:unserialize(MOVING_ITEMS_FILE, true)
 local update_tickrate = data_dir:unserialize(UPDATE_TICKRATE_FILE, 10)
 log.info("Loaded data (or created defaults).")
@@ -31,6 +33,7 @@ local function save()
   data_dir:serialize(NICKNAMES_FILE, nicknames)
   data_dir:serialize(ITEMS_MOVED_FILE, items_moved)
   data_dir:serialize(CONNECTIONS_FILE, connections)
+  data_dir:serialize(BUFFER_CHEST_FILE, buffer_chest)
   data_dir:serialize(MOVING_ITEMS_FILE, moving_items)
   data_dir:serialize(UPDATE_TICKRATE_FILE, update_tickrate)
   log.info("Saved data.")
@@ -1181,6 +1184,92 @@ local function nickname_menu()
   end
 end
 
+--- The buffer chest menu
+local function buffer_chest_menu()
+  --[[
+    ######################################################
+    # Buffer Chest                                       #
+    # Press enter to select a buffer chest.              #
+    # Press backspace to exit.                           #
+    #                                                    #
+    # The buffer chest is used in case the computer      #
+    # cannot interface directly with the origin          #
+    # inventory. It is not strictly needed, but if you   # -- maybe a note as well about having other connections
+    # notice that a connection is not being ran, you may # -- that can "clean up" the buffer chest?
+    # need to set a buffer chest.                        #
+    ######################################################
+    ######################################################
+    # > inventory_1                                      #
+    #   inventory_2 (selected)                           #
+    #   inventory_3                                      #
+    #   ...                                              #
+    ######################################################
+  ]]
+
+  log.debug("Buffer chest menu")
+
+  local win = window.create(term.current(), 1, 1, term.getSize())
+  local width, height = win.getSize()
+
+  local inventories = {}
+  peripheral.find("inventory", function(name)
+    ---@diagnostic disable-next-line: missing-return lmao yeah we don't return anything here, im using the function wrong
+    inventories[#inventories + 1] = name == buffer_chest and name .. " (selected)" or name
+  end)
+
+  local no_inv_flag = false
+
+  local timer_timeout = 0.5
+  local timer = os.startTimer(timer_timeout)
+  local scroll, selection = 1, 1
+
+  while true do
+    PrimeUI.clear()
+
+    -- Draw info box.
+    info_box(win, "Buffer Chest", "Press enter to select a buffer chest.\nPress backspace to exit.", 2)
+
+    if #inventories == 0 then
+      inventories = { no_inv_flag and "" or "No inventories" }
+    end
+
+    outlined_selection_box(win, 3, 7, width - 4, 9, inventories, "select", "select-change", colors.white, colors.black, scroll, selection)
+    PrimeUI.textBox(win, 3, 6, 13, 1, " Inventories ", colors.purple)
+
+    PrimeUI.keyAction(keys.backspace, "exit")
+
+    PrimeUI.addTask(function()
+      repeat
+        local _, timer_id = os.pullEvent("timer")
+      until timer_id == timer
+
+      no_inv_flag = not no_inv_flag
+      PrimeUI.resolve("tick")
+    end)
+
+    local object, event, selected, _selection, _scroll = PrimeUI.run()
+
+    if object == "selectionBox" then
+      if event == "select" then
+        buffer_chest = peripheral.find("inventory", function(name)
+          return name == selected
+        end)
+
+        log.debug("Selected buffer chest", buffer_chest)
+      elseif event == "select-change" then
+        selection = _selection
+        scroll = _scroll
+      end
+    elseif object == "tick" then
+      timer = os.startTimer(timer_timeout)
+      no_inv_flag = not no_inv_flag
+    elseif object == "keyAction" and event == "exit" then
+      log.debug("Exiting buffer chest menu.")
+      return
+    end
+  end
+end
+
 --- Log menu
 local function log_menu()
   log.info("Hello there!")
@@ -1201,6 +1290,9 @@ local function log_menu()
 
     -- Draw a box around where the log will be displayed.
     PrimeUI.borderBox(win, 3, 8, width - 4, height - 8, colors.white, colors.black)
+
+    -- Draw the log window
+    logging_win.setVisible(true)
   end
 
   draw_main()
@@ -1239,6 +1331,7 @@ local function main_menu()
   local update_connections = "Update Connections"
   local update_rate = "Change Update Rate"
   local nickname = "Change Peripheral Nicknames"
+  local set_buffer_chest = "Set Buffer Chest"
   local toggle = "Toggle Running"
   local view_log = "View Log"
   local exit = "Exit"
@@ -1251,10 +1344,11 @@ local function main_menu()
   local selection, scroll = 1, 1
 
   while true do
-    local description = ("Select an option from the list below.\n\nTotal items moved: %d\nTotal connections: %d\n\nUpdate rate: Every %d tick%s\nRunning: %s")
+    local description = ("Select an option from the list below.\n\nTotal items moved: %d\nTotal connections: %d\n\nBuffer Chest:%s\nUpdate rate: Every %d tick%s\nRunning: %s")
         :format(
           items_moved,
           #connections,
+          buffer_chest and buffer_chest or "Not set",
           update_tickrate,
           update_tickrate == 1 and "" or "s",
           moving_items and "Yes" or "No"
@@ -1273,6 +1367,7 @@ local function main_menu()
       update_connections,
       update_rate,
       nickname,
+      set_buffer_chest,
       toggle,
       view_log,
       exit
@@ -1297,6 +1392,8 @@ local function main_menu()
           tickrate_menu()
         elseif selected == nickname then
           nickname_menu()
+        elseif selected == set_buffer_chest then
+          buffer_chest_menu()
         elseif selected == toggle then
           moving_items = not moving_items
           log.debug("Toggled running to", moving_items)
