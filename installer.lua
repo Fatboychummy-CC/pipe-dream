@@ -6,6 +6,7 @@ local to_get = {
   "extern:startup.lua:https://raw.githubusercontent.com/Fatboychummy-CC/pipe-dream/main/pipe_dream.lua",
   "L:file_helper.lua:file_helper.lua",
   "L:logging.lua:logging.lua",
+  "L:thready.lua:thready.lua",
 }
 local program_name = "Pipe Dream"
 local pinestore_id = 89 -- Set this to the ID of the pinestore project if you wish to note to pinestore that a download has occurred.

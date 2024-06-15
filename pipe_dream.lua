@@ -1,16 +1,24 @@
 local PrimeUI = require("primeui")
 
+local thready = require "thready"
 local file_helper = require "file_helper"
 local data_dir = file_helper:instanced("data")
 local logging = require "logging"
 
 local log = logging.create_context("pipe_dream")
+local logging_win
+do
+  local width, height = term.getSize()
+  logging_win = window.create(term.current(), 1, 1, width - 4, height - 8)
+  logging_win.setVisible(false)
+  logging.set_window(logging_win)
+end
 
 local NICKNAMES_FILE = "nicknames.txt"
 local ITEMS_MOVED_FILE = "items_moved.txt"
 local CONNECTIONS_FILE = "connections.txt"
-local UPDATE_TICKRATE_FILE = "update_tickrate.txt"
 local MOVING_ITEMS_FILE = "moving_items.txt"
+local UPDATE_TICKRATE_FILE = "update_tickrate.txt"
 
 local nicknames = data_dir:unserialize(NICKNAMES_FILE, {})
 local items_moved = data_dir:unserialize(ITEMS_MOVED_FILE, 0)
@@ -62,6 +70,7 @@ end
 ---@field filter_mode "whitelist"|"blacklist" The item filter mode of the connection.
 ---@field mode "1234"|"split" The mode of the connection. 1234 means "push and fill 1, then 2, then 3, then 4". Split means "split input evenly between all outputs".
 ---@field moving boolean Whether the connection is active (moving items).
+---@field id integer The unique ID of the connection.
 
 --- Create an information box.
 ---@param win Window The window to draw the box on.
@@ -165,12 +174,12 @@ local function unacceptable(_type, reason)
 
   -- Draw info box.
   if _type == "error" then
-    info_box(win, "Error", ("An error occurred.\n%s\n\nPress enter to continue."):format(reason), 10, colors.red)
+    info_box(win, "Error", ("An error occurred.\n%s\n\nPress enter to continue."):format(reason), 15, colors.red)
   elseif _type == "input" then
     info_box(win, "Input Error", ("The last user input was unacceptable.\n%s\n\nPress enter to continue."):format(reason),
-      4, colors.red)
+      15, colors.red)
   else
-    info_box(win, "Unknown Error", ("An unknown error occurred.\n%s\n\nPress enter to continue."):format(reason), 10,
+    info_box(win, "Unknown Error", ("An unknown error occurred.\n%s\n\nPress enter to continue."):format(reason), 15,
       colors.red)
   end
 
@@ -1060,6 +1069,7 @@ local function tickrate_menu()
   end
 end
 
+--- The nickname menu
 local function nickname_menu()
   --[[
     ######################################################
@@ -1171,6 +1181,58 @@ local function nickname_menu()
   end
 end
 
+--- Log menu
+local function log_menu()
+  log.info("Hello there!")
+
+  PrimeUI.clear()
+
+  local win = window.create(term.current(), 1, 1, term.getSize())
+  local width, height = win.getSize()
+
+  local function draw_main()
+    -- Draw the info box.
+    info_box(
+      win,
+      "Log",
+      "Press enter to dump log to a file.\nPress c to clear warns/errors.\nPress backspace to exit.",
+      3
+    )
+
+    -- Draw a box around where the log will be displayed.
+    PrimeUI.borderBox(win, 3, 8, width - 4, height - 8, colors.white, colors.black)
+  end
+
+  draw_main()
+
+  PrimeUI.keyAction(keys.backspace, "exit")
+  PrimeUI.keyAction(keys.enter, "dump")
+
+  local object, event = PrimeUI.run()
+
+  if object == "keyAction" then
+    if event == "exit" then
+      log.info("Exiting log menu.")
+    elseif event == "dump" then
+      log.info("Getting output file...")
+
+      PrimeUI.clear()
+
+      draw_main()
+
+      outlined_input_box(win, 4, 4, width - 6, "output", colors.white, colors.black, nil, nil, nil, "log.txt")
+      PrimeUI.textBox(win, 4, 3, 10, 1, " Filename ", colors.purple)
+
+      local object, event, output = PrimeUI.run()
+
+      if object == "inputBox" and event == "output" then
+        log.info("Dumping log to", output)
+
+        logging.dump_log(output)
+      end
+    end
+  end
+end
 
 --- Main menu
 local function main_menu()
@@ -1178,68 +1240,435 @@ local function main_menu()
   local update_rate = "Change Update Rate"
   local nickname = "Change Peripheral Nicknames"
   local toggle = "Toggle Running"
+  local view_log = "View Log"
   local exit = "Exit"
 
   log.info("Start main menu")
 
-  local description = ("Select an option from the list below.\n\nTotal items moved: %d\nTotal connections: %d\n\nUpdate rate: Every %d tick%s\nRunning: %s")
-      :format(
-        items_moved,
-        #connections,
-        update_tickrate,
-        update_tickrate == 1 and "" or "s",
-        moving_items and "Yes" or "No"
-      )
+  local menu_timer_timeout = 5
+  local menu_timer = os.startTimer(menu_timer_timeout)
 
-  local win = window.create(term.current(), 1, 1, term.getSize())
-  local width, height = win.getSize()
+  local selection, scroll = 1, 1
 
-  PrimeUI.clear()
+  while true do
+    local description = ("Select an option from the list below.\n\nTotal items moved: %d\nTotal connections: %d\n\nUpdate rate: Every %d tick%s\nRunning: %s")
+        :format(
+          items_moved,
+          #connections,
+          update_tickrate,
+          update_tickrate == 1 and "" or "s",
+          moving_items and "Yes" or "No"
+        )
 
-  -- Create the information box.
-  info_box(win, "Main Menu", description, 7)
+    local win = window.create(term.current(), 1, 1, term.getSize())
+    local width, height = win.getSize()
 
-  -- Create the selection box.
-  outlined_selection_box(win, 4, 14, width - 6, height - 14, {
-    update_connections,
-    update_rate,
-    nickname,
-    toggle,
-    exit
-  }, "selection", nil, colors.white, colors.black, 1, 1)
+    PrimeUI.clear()
 
-  local object, event, selected = PrimeUI.run()
-  log.debug("Selected", selected)
+    -- Create the information box.
+    info_box(win, "Main Menu", description, 8)
 
-  if selected == update_connections then
-    connections_main_menu()
-  elseif selected == update_rate then
-    tickrate_menu()
-  elseif selected == nickname then
-    nickname_menu()
-  elseif selected == toggle then
-    moving_items = not moving_items
-    log.debug("Toggled running to", moving_items)
-  elseif selected == exit then
-    log.info("Exiting program")
-    save()
-    return true
+    -- Create the selection box.
+    outlined_selection_box(win, 4, 12, width - 6, height - 12, {
+      update_connections,
+      update_rate,
+      nickname,
+      toggle,
+      view_log,
+      exit
+    }, "selection", "selection-change", colors.white, colors.black, selection, scroll)
+
+    PrimeUI.addTask(function()
+      repeat
+        local _, timer_id = os.pullEvent("timer")
+      until timer_id == menu_timer
+
+      PrimeUI.resolve("timeout")
+    end)
+
+    local object, event, selected, _selection, _scroll = PrimeUI.run()
+    log.debug("Selected", selected)
+
+    if object == "selectionBox" then
+      if event == "selection" then
+        if selected == update_connections then
+          connections_main_menu()
+        elseif selected == update_rate then
+          tickrate_menu()
+        elseif selected == nickname then
+          nickname_menu()
+        elseif selected == toggle then
+          moving_items = not moving_items
+          log.debug("Toggled running to", moving_items)
+        elseif selected == view_log then
+          log_menu()
+        elseif selected == exit then
+          log.info("Exiting program")
+          save()
+          return true
+        end
+        save()
+        menu_timer = os.startTimer(menu_timer_timeout)
+      elseif event == "selection-change" then
+        selection = _selection
+        scroll = _scroll
+      end
+    elseif object == "timeout" then
+      save()
+      menu_timer = os.startTimer(menu_timer_timeout)
+    end
   end
-
-  save()
 end
 
-while true do
-  local ok, result = pcall(main_menu)
-  if not ok then
-    ---@diagnostic disable-next-line ITS A HEKKIN STRING
-    unacceptable("error", result)
+------------------------
+-- Inventory Section
+------------------------
 
-    print() -- put the cursor back on the screen
-    error(result, 0)
-    break
-  elseif result then
-    print() -- put the cursor back on the screen
-    break
+---@class inventory_request
+---@field funcs function[] The inventory requests to call, wrapped with arguments (i.e: {function() return inventory.getItemDetail(i) end, ...}). The returned value will be stored in the results field.
+---@field id integer The ID of the request, used to identify it in the queue.
+---@field results table[] The results of the inventory requests, in the same order as funcs.
+
+local backend_log = logging.create_context("backend")
+
+---@type integer The ID of the last inventory request.
+local last_inventory_request_id = 0
+
+---@type inventory_request[] A queue of inventory requests to process.
+local inventory_request_queue = {}
+
+---@type integer A soft maximum number of inventory requests to process at once.
+local max_inventory_requests = 175
+
+---@type integer If inserting the current job will overflow the max_inventory_requests, this is how much we are allowed to go over before the job is rejected. Thus, a hard limit of max_inventory_requests + max_inventory_requests_overflow is enforced.
+local max_inventory_requests_overflow = 25
+
+---@type boolean If we are actually processing something at this very moment. Used so that we can determine whether or not queueing a `inventory_request:new` event is necessary.
+local processing_inventory_requests = false
+
+
+--- Process inventory requests. We can run up to 256 of these at once (event queue length)
+--- However, we will likely use a smaller value to allow for space for other events to not
+--- overflow the queue.
+local function process_inventory_requests()
+  local current = {}
+  local result_ts = {}
+  local result_events = {}
+  local current_n = 0
+
+  --- Process the current request queue, or do nothing if there are no requests.
+  local function process_queue()
+    if current_n == 0 then return end
+
+    backend_log.debug("Processing", current_n, "inventory requests.")
+
+    local funcs = {}
+
+    for i = 1, current_n do
+      local func = current[i]
+      local result = result_ts[i]
+
+      funcs[i] = function()
+        result.out[result.index] = func()
+      end
+    end
+
+    parallel.waitForAll(table.unpack(funcs, 1, current_n))
+
+    for _, event in ipairs(result_events) do
+      os.queueEvent("inventory_request:" .. event)
+    end
+
+    current = {}
+    result_ts = {}
+    result_events = {}
+    current_n = 0
   end
+
+  while true do
+    processing_inventory_requests = true
+
+    while inventory_request_queue[1] do
+      local request = inventory_request_queue[1]
+      local count = #request.funcs
+
+      if current_n + count > max_inventory_requests + max_inventory_requests_overflow then
+        process_queue()
+      end
+
+      for i = 1, count do
+        current[current_n + i] = request.funcs[i]
+        result_ts[current_n + i] = {out = request.results, index = i}
+      end
+      result_events[#result_events + 1] = request.id
+
+      current_n = current_n + count
+    end
+
+    process_queue()
+    processing_inventory_requests = false
+
+    os.pullEvent("inventory_request:new") -- Wait for new requests
+  end
+end
+
+--- Make an inventory request, then wait until it completes.
+---@param funcs function[] The inventory requests to call, wrapped with arguments (i.e: {function() return inventory.getItemDetail(i) end, ...}).
+---@return table[] The results of the inventory requests, in the same order as funcs.
+local function make_inventory_request(funcs)
+  last_inventory_request_id = last_inventory_request_id + 1
+  local id = last_inventory_request_id
+  local results = {}
+
+  backend_log.debug("New inventory request:", id)
+
+  -- insert request data into the queue
+  table.insert(inventory_request_queue, {funcs = funcs, id = id, results = results})
+
+  -- If we are not currently processing inventory requests, queue a new event to start the process.
+  if not processing_inventory_requests then
+    os.queueEvent("inventory_request:new")
+  end
+
+  -- Wait for the results to be filled in.
+  os.pullEvent("inventory_request:" .. id)
+
+  backend_log.debug("Inventory request", id, "completed.")
+
+  return results
+end
+
+--- Determines if the item can be moved from one inventory to another, given the filter mode and filter.
+---@param item string The item to check.
+---@param list string[] The list of items to check against.
+---@param mode "whitelist"|"blacklist" The mode to use.
+local function can_move(item, list, mode)
+  if mode ~= "whitelist" and mode ~= "blacklist" then
+    error("Invalid mode '" .. tostring(mode) .. "'")
+  end
+
+  -- Whitelist
+  if mode == "whitelist" then
+    for _, v in ipairs(list) do
+      if v == item then
+        return true
+      end
+    end
+
+    return false
+  end
+
+  -- Blacklist
+  for _, v in ipairs(list) do
+    if v == item then
+      return false
+    end
+  end
+
+  return true
+end
+
+--- Run a connection from the "origin" node.
+--- We do this without context of the endpoint nodes, as we can't guarantee that they are inventories.
+---@param connection Connection The connection to run.
+local function _run_connection_from_origin(connection)
+  local filter = connection.filter_list
+  local filter_mode = connection.filter_mode
+  local mode = connection.mode
+  local from = connection.from
+  local to = connection.to
+
+  local inv = peripheral.wrap(from) --[[@as Inventory?]]
+
+  if not inv then
+    backend_log.warn("Connection", connection.name, "failed to run: origin peripheral is missing.")
+    return
+  end
+
+  local inv_contents = inv.list()
+
+  -- If the inventory is empty, we can't do anything.
+  if not next(inv_contents) then
+    backend_log.debug("Connection", connection.name, "is empty, skipping.")
+    return
+  end
+
+  local funcs = {}
+  if mode == "1234" then
+    -- Iterate through each inventory, and push whatever remains in the input inventory to the selected output.
+    for _, output_inventory in ipairs(to) do
+      -- Queue up the items to move.
+      for slot, item in pairs(inv_contents) do
+        -- if items are left in this slot, and the item matches the filter, queue the move.
+        if item.count > 0 and can_move(item.name, filter, filter_mode) then
+          funcs[#funcs + 1] = function()
+            local moved = inv.pushItems(output_inventory, slot)
+
+            items_moved = items_moved + moved  -- track the number of items moved.
+
+            if moved then
+              item.count = item.count - moved
+            end
+          end
+        end
+      end
+
+      if #funcs == 0 then
+        break -- we are done moving items.
+      end
+
+      -- Actually run the request.
+      make_inventory_request(funcs)
+
+      -- Clear the funcs table for the next iteration.
+      funcs = {}
+    end
+  else -- mode == "split"
+    -- First, we need to calculate how much of each item (that we can move) in the inventory
+    -- we have, then split it evenly between the output inventories.
+    local item_counts = {}
+
+    for _, item in pairs(inv_contents) do
+      if can_move(item.name, filter, filter_mode) then
+        if not item_counts[item.name] then
+          item_counts[item.name] = 0
+        end
+
+        item_counts[item.name] = item_counts[item.name] + item.count
+      end
+    end
+
+    -- Next, we need to calculate how many items to move to each inventory.
+    -- We can do this by simply dividing each item count by the number of inventories.
+    local inv_count = #to
+
+    for name, count in pairs(item_counts) do
+      local split = math.floor(count / inv_count)
+
+      item_counts[name] = split
+    end
+
+    -- Finally, we can start pushing items to the inventories.
+    -- We will repeat the process until we have moved all of the (current) items in the inventory.
+    -- In theory this shouldn't be an infinite loop?
+    while true do
+      for slot, item in pairs(inv_contents) do
+        if item.count > 0 and item_counts[item.name] then
+          funcs[#funcs + 1] = function()
+            local moved = inv.pushItems(to[1], slot, item_counts[item.name])
+
+            items_moved = items_moved + moved  -- track the number of items moved.
+
+            if moved then
+              item.count = item.count - moved
+            end
+          end
+        end
+      end
+
+      if #funcs == 0 then
+        break -- we are done moving items.
+      end
+
+      -- Actually run the request.
+      make_inventory_request(funcs)
+
+      -- Clear the funcs table for the next iteration.
+      funcs = {}
+    end
+  end
+end
+
+--- Run a connection to the "to" nodes.
+--- We do this with the buffer chest as the intermediary, but only forward items in the filter.
+--- Because of this, the buffer chest may overflow. User should have other connections on the buffer chest to handle this.
+---@param connection Connection The connection to run.
+local function _run_connection_to_inventories(connection)
+  local filter = connection.filter_list
+  local filter_mode = connection.filter_mode
+  local mode = connection.mode
+  local from = connection.from
+  local to = connection.to
+
+  backend_log.error("Connection", connection.name, "could not be run: not implemented.")
+end
+
+--- Implementation of the connection runner.
+---@param connection Connection The connection to run.
+local function _run_connection_impl(connection)
+  local from = connection.from
+  local to = connection.to
+
+  -- First, we need to check if our from node is an inventory.
+  if peripheral.hasType(from, "inventory") then
+    _run_connection_from_origin(connection)
+  end
+
+  -- Next check is if ALL output nodes are inventories.
+  local all_invs = true
+  for _, v in ipairs(to) do
+    if not peripheral.hasType(v, "inventory") then
+      all_invs = false
+      break
+    end
+  end
+  if all_invs then
+    _run_connection_to_inventories(connection)
+  end
+
+  -- If we made it here, neither the origin or all destinations are inventories.
+  -- Thus, fail.
+  backend_log.error("Connection", connection.name, " could not be run: could not select a valid path. Consider using a buffer chest.")
+end
+
+--- Run the rules of a connection.
+---@param connection Connection The connection to run the rules of.
+local function run_connection(connection)
+  if connection.moving then
+    backend_log.debug("Running connection", connection.name)
+    _run_connection_impl(connection)
+    backend_log.debug("Connection", connection.name, "completed.")
+  end
+end
+
+local function backend()
+  local known_ids = {}
+  while true do
+    for _, connection in ipairs(connections) do
+      local id = connection.id
+
+      -- Only spawn a new thread if the connection has finished running.
+      if known_ids[id] then
+        if not thready.is_alive(known_ids[id]) then
+          known_ids[id] = thready.spawn("connection_runners", function() run_connection(connection) end)
+        else
+          backend_log.warn("Connection", connection.name, "took too long, and was skipped on this cycle.")
+        end
+      else
+        -- ... Or never ran yet.
+        known_ids[id] = thready.spawn("connection_runners", function() run_connection(connection) end)
+      end
+    end
+
+    sleep(0.05 * update_tickrate)
+  end
+end
+
+local function frontend()
+  while true do
+    if main_menu() then
+      return
+    end
+  end
+end
+
+local ok, err = pcall(thready.parallelAny, frontend, backend, process_inventory_requests)
+print() -- put the cursor back on the screen
+
+if not ok then
+  log.fatal(err)
+  ---@diagnostic disable-next-line ITS A HEKKIN STRING
+  unacceptable("error", err)
+
+  ---@fixme add test mode if error was "Terminated" and user terminates the unacceptable prompt again.
 end
