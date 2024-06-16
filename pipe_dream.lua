@@ -804,7 +804,7 @@ local function _connections_edit_impl(connection_data)
             expanded_section = 1
           end
         else
-          log.info("Advance a section.")
+          log.debug("Advance a section.")
           expanded_section = expanded_section + 1
           if expanded_section > #section_infos then
             if save_connection() then
@@ -1263,6 +1263,9 @@ local function log_menu()
       end
     end
   end
+
+  -- Hide the log window
+  logging_win.setVisible(false)
 end
 
 --- Main menu
