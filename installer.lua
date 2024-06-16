@@ -2,7 +2,7 @@
 
 local to_get = {
   "extern:primeui.lua:https://raw.githubusercontent.com/Fatboychummy-CC/pipe-dream/main/primeui.lua",
-  "extern:succ.lua:https://raw.githubusercontent.com/Fatboychummy-CC/pipe-dream/main/pipe_dream.lua",
+  "extern:pipe_dream.lua:https://raw.githubusercontent.com/Fatboychummy-CC/pipe-dream/main/pipe_dream.lua",
   "extern:startup.lua:https://raw.githubusercontent.com/Fatboychummy-CC/pipe-dream/main/pipe_dream.lua",
   "L:file_helper.lua:file_helper.lua",
   "L:logging.lua:logging.lua",
