@@ -17,14 +17,12 @@ end
 local NICKNAMES_FILE = "nicknames.txt"
 local ITEMS_MOVED_FILE = "items_moved.txt"
 local CONNECTIONS_FILE = "connections.txt"
-local BUFFER_CHEST_FILE = "buffer_chest.txt"
 local MOVING_ITEMS_FILE = "moving_items.txt"
 local UPDATE_TICKRATE_FILE = "update_tickrate.txt"
 
 local nicknames = data_dir:unserialize(NICKNAMES_FILE, {})
 local items_moved = data_dir:unserialize(ITEMS_MOVED_FILE, 0)
 local connections = data_dir:unserialize(CONNECTIONS_FILE, {})
-local buffer_chest = data_dir:unserialize(BUFFER_CHEST_FILE, nil)
 local moving_items = data_dir:unserialize(MOVING_ITEMS_FILE, true)
 local update_tickrate = data_dir:unserialize(UPDATE_TICKRATE_FILE, 10)
 log.info("Loaded data (or created defaults).")
@@ -33,7 +31,6 @@ local function save()
   data_dir:serialize(NICKNAMES_FILE, nicknames)
   data_dir:serialize(ITEMS_MOVED_FILE, items_moved)
   data_dir:serialize(CONNECTIONS_FILE, connections)
-  data_dir:serialize(BUFFER_CHEST_FILE, buffer_chest)
   data_dir:serialize(MOVING_ITEMS_FILE, moving_items)
   data_dir:serialize(UPDATE_TICKRATE_FILE, update_tickrate)
   log.info("Saved data.")
@@ -578,6 +575,10 @@ local function _connections_edit_impl(connection_data)
     log.debug("Creating new connection")
   end
 
+  --- If the connection is from a non-inventory type peripheral, it is
+  --- connection limited, and can only move items to one destination. This means
+  --- the filter and mode options should be disabled.
+  local connection_limited = false
 
   local cached_peripheral_list = get_peripherals()
   local expanded_section = 1
@@ -603,7 +604,8 @@ local function _connections_edit_impl(connection_data)
         default = _connection_data.name,
         action = "set-name",
       },
-      increment_on_enter = true
+      increment_on_enter = true,
+      disable_when_limited = false,
     },
     {
       name = (
@@ -617,7 +619,8 @@ local function _connections_edit_impl(connection_data)
         action = "select-origin",
         items = periphs_with_nicknames,
       },
-      increment_on_enter = true
+      increment_on_enter = true,
+      disable_when_limited = false,
     },
     {
       name = (
@@ -625,13 +628,15 @@ local function _connections_edit_impl(connection_data)
         "Destinations - " .. (#_connection_data.to) .. " selected"
       ),
       info = "Select the peripherals this connection is to.",
+      connection_limited_info = "This connection is limited, and can only set a single destination.",
       size = 7,
       object = "selection_box",
       args = {
         action = "select-destination",
         items = destination_periphs_with_nicknames,
       },
-      increment_on_enter = false
+      increment_on_enter = false,
+      disable_when_limited = false,
     },
     {
       name = (
@@ -639,13 +644,15 @@ local function _connections_edit_impl(connection_data)
         "Filter Mode - " .. _connection_data.filter_mode
       ),
       info = "Select the filter mode of the connection. The list starts empty, and you can edit it in another menu.",
+      connection_limited_info = "This connection is limited, filters cannot apply to it.",
       size = 2,
       object = "selection_box",
       args = {
         action = "select-filter_mode",
         items = { "Blacklist", "Whitelist" },
       },
-      increment_on_enter = true
+      increment_on_enter = true,
+      disable_when_limited = true,
     },
     {
       name = (
@@ -653,13 +660,15 @@ local function _connections_edit_impl(connection_data)
         "Mode - " .. _connection_data.mode
       ),
       info = "Select the mode of the connection.",
+      connection_limited_info = "This connection is limited, and can only be to one destination.",
       size = 2,
       object = "selection_box",
       args = {
         action = "select-mode",
         items = { "Fill 1, then 2, then 3, then 4", "Split evenly" },
       },
-      increment_on_enter = true
+      increment_on_enter = true,
+      disable_when_limited = true,
     }
   }
 
@@ -729,7 +738,7 @@ local function _connections_edit_impl(connection_data)
     PrimeUI.clear()
 
     -- Draw info box.
-    info_box(win, "Add Connection", section_info.info, 3)
+    info_box(win, "Add Connection", connection_limited and section_info.connection_limited_info or section_info.info, 3)
 
     local y = 8
 
@@ -738,6 +747,11 @@ local function _connections_edit_impl(connection_data)
       local section = section_infos[i]
       local expanded = i == expanded_section
       local color = expanded and colors.purple or colors.gray
+
+      local text = ' ' .. section.name .. ' '
+      if section.disable_when_limited and connection_limited then
+        text = ' ' .. section.name:gsub(" ?%-.+", "") .. ' ' .. "- Connection Limited "
+      end
 
       if expanded then
         -- Draw the stuffs
@@ -754,18 +768,18 @@ local function _connections_edit_impl(connection_data)
             args.items = { "No peripherals" }
           end
 
-          outlined_selection_box(win, 3, y, width - 4, section.size, args.items, args.action, nil, colors.white,
-            colors.black, args.selection or 1, args.scroll or 1)
+          outlined_selection_box(win, 3, y, width - 4, section.size, args.items, args.action, nil, section.disable_when_limited and connection_limited and colors.red or colors.white,
+            colors.black, args.selection or 1, args.scroll or 1, section.disable_when_limited and connection_limited)
         else
           error("Invalid object type '" .. tostring(object) .. "' at index " .. i)
         end
 
         -- Draw the text box
-        PrimeUI.textBox(win, 3, y - 1, #section.name + 2, 1, ' ' .. section.name .. ' ', color, colors.black)
+        PrimeUI.textBox(win, 3, y - 1, #text, 1, text, section.disable_when_limited and connection_limited and colors.orange or color, colors.black)
       else
         -- Draw the border box and text box
         PrimeUI.borderBox(win, 3, y, width - 4, -1, color, colors.black)
-        PrimeUI.textBox(win, 3, y - 1, #section.name + 2, 1, ' ' .. section.name .. ' ', color, colors.black)
+        PrimeUI.textBox(win, 3, y - 1, #text, 1, text, color, colors.black)
       end
 
       y = y + (expanded and section.size + 2 or 1)
@@ -804,9 +818,16 @@ local function _connections_edit_impl(connection_data)
       end
     elseif object == "selectionBox" then
       if event == "select-origin" then
-        _connection_data.from = cached_peripheral_list[selection]
-        section_info.name = "Origin - " .. result
-        log.debug("Selected origin", _connection_data.from)
+        local becomes_limited = not peripheral.hasType(cached_peripheral_list[selection], "inventory")
+
+        if becomes_limited and #_connection_data.to > 1 then
+          unacceptable("input", "The last request would make this connection limited, and would only be able to have one destination.\nRemove all but one destination and try again.")
+        else
+          connection_limited = becomes_limited
+          _connection_data.from = cached_peripheral_list[selection]
+          section_info.name = "Origin - " .. result
+          log.debug("Selected origin", _connection_data.from)
+        end
       elseif event == "select-destination" then
         -- Insert the peripheral into the list of destinations.
         -- Unless it is already in the list, in which case remove it.
@@ -824,15 +845,19 @@ local function _connections_edit_impl(connection_data)
         section_info.args.selection = selection
         section_info.args.scroll = scroll_result
 
-        if not found then
-          table.insert(_connection_data.to, cached_peripheral_list[selection])
-          log.debug("Added destination", cached_peripheral_list[selection])
-        end
-
-        if #_connection_data.to == 0 then
-          section_info.name = "Destinations"
+        if connection_limited and #_connection_data.to > 1 then
+          unacceptable("input", "This connection is connection limited, and can only have one destination.\nIf you need more destinations, create a buffer chest connection.")
         else
-          section_info.name = "Destinations - " .. (#_connection_data.to) .. " selected"
+          if not found then
+            table.insert(_connection_data.to, cached_peripheral_list[selection])
+            log.debug("Added destination", cached_peripheral_list[selection])
+          end
+
+          if #_connection_data.to == 0 then
+            section_info.name = "Destinations"
+          else
+            section_info.name = "Destinations - " .. (#_connection_data.to) .. " selected"
+          end
         end
       elseif event == "select-filter_mode" then
         _connection_data.filter_mode = selection == 1 and "blacklist" or "whitelist"
@@ -1184,92 +1209,6 @@ local function nickname_menu()
   end
 end
 
---- The buffer chest menu
-local function buffer_chest_menu()
-  --[[
-    ######################################################
-    # Buffer Chest                                       #
-    # Press enter to select a buffer chest.              #
-    # Press backspace to exit.                           #
-    #                                                    #
-    # The buffer chest is used in case the computer      #
-    # cannot interface directly with the origin          #
-    # inventory. It is not strictly needed, but if you   # -- maybe a note as well about having other connections
-    # notice that a connection is not being ran, you may # -- that can "clean up" the buffer chest?
-    # need to set a buffer chest.                        #
-    ######################################################
-    ######################################################
-    # > inventory_1                                      #
-    #   inventory_2 (selected)                           #
-    #   inventory_3                                      #
-    #   ...                                              #
-    ######################################################
-  ]]
-
-  log.debug("Buffer chest menu")
-
-  local win = window.create(term.current(), 1, 1, term.getSize())
-  local width, height = win.getSize()
-
-  local inventories = {}
-  peripheral.find("inventory", function(name)
-    ---@diagnostic disable-next-line: missing-return lmao yeah we don't return anything here, im using the function wrong
-    inventories[#inventories + 1] = name == buffer_chest and name .. " (selected)" or name
-  end)
-
-  local no_inv_flag = false
-
-  local timer_timeout = 0.5
-  local timer = os.startTimer(timer_timeout)
-  local scroll, selection = 1, 1
-
-  while true do
-    PrimeUI.clear()
-
-    -- Draw info box.
-    info_box(win, "Buffer Chest", "Press enter to select a buffer chest.\nPress backspace to exit.", 2)
-
-    if #inventories == 0 then
-      inventories = { no_inv_flag and "" or "No inventories" }
-    end
-
-    outlined_selection_box(win, 3, 7, width - 4, 9, inventories, "select", "select-change", colors.white, colors.black, scroll, selection)
-    PrimeUI.textBox(win, 3, 6, 13, 1, " Inventories ", colors.purple)
-
-    PrimeUI.keyAction(keys.backspace, "exit")
-
-    PrimeUI.addTask(function()
-      repeat
-        local _, timer_id = os.pullEvent("timer")
-      until timer_id == timer
-
-      no_inv_flag = not no_inv_flag
-      PrimeUI.resolve("tick")
-    end)
-
-    local object, event, selected, _selection, _scroll = PrimeUI.run()
-
-    if object == "selectionBox" then
-      if event == "select" then
-        buffer_chest = peripheral.find("inventory", function(name)
-          return name == selected
-        end)
-
-        log.debug("Selected buffer chest", buffer_chest)
-      elseif event == "select-change" then
-        selection = _selection
-        scroll = _scroll
-      end
-    elseif object == "tick" then
-      timer = os.startTimer(timer_timeout)
-      no_inv_flag = not no_inv_flag
-    elseif object == "keyAction" and event == "exit" then
-      log.debug("Exiting buffer chest menu.")
-      return
-    end
-  end
-end
-
 --- Log menu
 local function log_menu()
   log.info("Hello there!")
@@ -1331,7 +1270,6 @@ local function main_menu()
   local update_connections = "Update Connections"
   local update_rate = "Change Update Rate"
   local nickname = "Change Peripheral Nicknames"
-  local set_buffer_chest = "Set Buffer Chest"
   local toggle = "Toggle Running"
   local view_log = "View Log"
   local exit = "Exit"
@@ -1344,11 +1282,10 @@ local function main_menu()
   local selection, scroll = 1, 1
 
   while true do
-    local description = ("Select an option from the list below.\n\nTotal items moved: %d\nTotal connections: %d\n\nBuffer Chest:%s\nUpdate rate: Every %d tick%s\nRunning: %s")
+    local description = ("Select an option from the list below.\n\nTotal items moved: %d\nTotal connections: %d\n\nUpdate rate: Every %d tick%s\nRunning: %s")
         :format(
           items_moved,
           #connections,
-          buffer_chest and buffer_chest or "Not set",
           update_tickrate,
           update_tickrate == 1 and "" or "s",
           moving_items and "Yes" or "No"
@@ -1367,7 +1304,6 @@ local function main_menu()
       update_connections,
       update_rate,
       nickname,
-      set_buffer_chest,
       toggle,
       view_log,
       exit
@@ -1392,8 +1328,6 @@ local function main_menu()
           tickrate_menu()
         elseif selected == nickname then
           nickname_menu()
-        elseif selected == set_buffer_chest then
-          buffer_chest_menu()
         elseif selected == toggle then
           moving_items = not moving_items
           log.debug("Toggled running to", moving_items)
@@ -1676,18 +1610,40 @@ local function _run_connection_from_origin(connection)
   end
 end
 
---- Run a connection to the "to" nodes.
---- We do this with the buffer chest as the intermediary, but only forward items in the filter.
---- Because of this, the buffer chest may overflow. User should have other connections on the buffer chest to handle this.
+--- Run a connection to a single 'to' node.
 ---@param connection Connection The connection to run.
-local function _run_connection_to_inventories(connection)
-  local filter = connection.filter_list
-  local filter_mode = connection.filter_mode
-  local mode = connection.mode
+local function _run_connection_to_inventory(connection)
   local from = connection.from
-  local to = connection.to
+  local to = connection.to[1]
 
-  backend_log.error("Connection", connection.name, "could not be run: not implemented.")
+  -- We cannot see what is in the `from` node, since we cannot `.list()` or even
+  -- `.size()` it.
+  -- This means we cannot apply the filter or anything. Instead, the user should
+  -- create another connection from the `to` node with the filters applied.
+  --
+  -- As well, since we don't know the items inside or even the size, we will
+  -- call `pullItems` as many times as we have slots in `to`.
+
+  local inv = peripheral.wrap(to) --[[@as Inventory?]]
+
+  if not inv or not inv.list then
+    backend_log.error("Connection", connection.name, "failed to run: destination peripheral is missing or is not an inventory.")
+    return
+  end
+
+  local size = inv.size()
+
+  local funcs = {}
+
+  for i = 1, size do
+    funcs[#funcs + 1] = function()
+      local moved = inv.pullItems(from, i)
+
+      items_moved = items_moved + moved  -- track the number of items moved.
+    end
+  end
+
+  make_inventory_request(funcs)
 end
 
 --- Implementation of the connection runner.
@@ -1701,16 +1657,9 @@ local function _run_connection_impl(connection)
     _run_connection_from_origin(connection)
   end
 
-  -- Next check is if ALL output nodes are inventories.
-  local all_invs = true
-  for _, v in ipairs(to) do
-    if not peripheral.hasType(v, "inventory") then
-      all_invs = false
-      break
-    end
-  end
-  if all_invs then
-    _run_connection_to_inventories(connection)
+  -- Next check is if the first output node is any inventory.
+  if peripheral.hasType(to[1], "inventory") then
+    _run_connection_to_inventory(connection)
   end
 
   -- If we made it here, neither the origin or all destinations are inventories.
