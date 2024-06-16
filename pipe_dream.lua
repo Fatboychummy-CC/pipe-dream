@@ -20,11 +20,11 @@ local CONNECTIONS_FILE = "connections.txt"
 local MOVING_ITEMS_FILE = "moving_items.txt"
 local UPDATE_TICKRATE_FILE = "update_tickrate.txt"
 
-local nicknames = data_dir:unserialize(NICKNAMES_FILE, {})
-local items_moved = data_dir:unserialize(ITEMS_MOVED_FILE, 0)
-local connections = data_dir:unserialize(CONNECTIONS_FILE, {})
-local moving_items = data_dir:unserialize(MOVING_ITEMS_FILE, true)
-local update_tickrate = data_dir:unserialize(UPDATE_TICKRATE_FILE, 10)
+local nicknames = data_dir:unserialize(NICKNAMES_FILE, {}) ---@type table<string, string>
+local items_moved = data_dir:unserialize(ITEMS_MOVED_FILE, 0) ---@type integer
+local connections = data_dir:unserialize(CONNECTIONS_FILE, {}) ---@type Connection[]
+local moving_items = data_dir:unserialize(MOVING_ITEMS_FILE, true) ---@type boolean
+local update_tickrate = data_dir:unserialize(UPDATE_TICKRATE_FILE, 10) ---@type integer
 log.info("Loaded data (or created defaults).")
 
 local function save()
@@ -1750,7 +1750,7 @@ end
 --- Run the rules of a connection.
 ---@param connection Connection The connection to run the rules of.
 local function run_connection(connection)
-  if connection.moving then
+  if moving_items and connection.moving then
     backend_log.debug("Running connection", connection.name)
     _run_connection_impl(connection)
     backend_log.debug("Connection", connection.name, "completed.")
