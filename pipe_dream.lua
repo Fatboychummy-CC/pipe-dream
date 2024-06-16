@@ -845,7 +845,7 @@ local function _connections_edit_impl(connection_data)
         section_info.args.selection = selection
         section_info.args.scroll = scroll_result
 
-        if connection_limited and #_connection_data.to > 1 then
+        if connection_limited and #_connection_data.to >= 1 then
           unacceptable("input", "This connection is connection limited, and can only have one destination.\nIf you need more destinations, create a buffer chest connection.")
         else
           if not found then
