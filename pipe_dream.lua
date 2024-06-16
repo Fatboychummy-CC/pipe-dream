@@ -1294,39 +1294,72 @@ local function log_menu()
     )
 
     -- Draw a box around where the log will be displayed.
-    PrimeUI.borderBox(win, 3, 8, width - 4, height - 8, colors.white, colors.black)
+    PrimeUI.borderBox(
+      win,
+      3,
+      8,
+      width - 4,
+      height - 8,
+      logging.has_errored() and colors.red or logging.has_warned() and colors.orange or colors.white,
+      colors.black
+    )
 
     -- Draw the log window
     logging_win.setVisible(true)
+    logging_win.redraw() -- ensure it actually redraws.
   end
 
-  draw_main()
+  local timer_timeout = 0.5
+  local timer = os.startTimer(timer_timeout)
 
-  PrimeUI.keyAction(keys.backspace, "exit")
-  PrimeUI.keyAction(keys.enter, "dump")
+  while true do
+    PrimeUI.clear()
+    draw_main()
 
-  local object, event = PrimeUI.run()
+    PrimeUI.keyAction(keys.backspace, "exit")
+    PrimeUI.keyAction(keys.enter, "dump")
+    PrimeUI.keyAction(keys.c, "clear")
 
-  if object == "keyAction" then
-    if event == "exit" then
-      log.info("Exiting log menu.")
-    elseif event == "dump" then
-      log.info("Getting output file...")
+    PrimeUI.addTask(function()
+      repeat
+        local _, timer_id = os.pullEvent("timer")
+      until timer_id == timer
 
-      PrimeUI.clear()
+      PrimeUI.resolve("timeout")
+    end)
 
-      draw_main()
+    local object, event = PrimeUI.run()
 
-      outlined_input_box(win, 4, 4, width - 6, "output", colors.white, colors.black, nil, nil, nil, "log.txt")
-      PrimeUI.textBox(win, 4, 3, 10, 1, " Filename ", colors.purple)
+    if object == "keyAction" then
+      if event == "exit" then
+        log.info("Exiting log menu.")
+        break
+      elseif event == "dump" then
+        log.info("Getting output file...")
 
-      local object, event, output = PrimeUI.run()
+        PrimeUI.clear()
 
-      if object == "inputBox" and event == "output" then
-        log.info("Dumping log to", output)
+        draw_main()
 
-        logging.dump_log(output)
+        outlined_input_box(win, 4, 4, width - 6, "output", colors.white, colors.black, nil, nil, nil, "log.txt")
+        PrimeUI.textBox(win, 4, 3, 10, 1, " Filename ", colors.purple)
+
+        local object, event, output = PrimeUI.run()
+
+        if object == "inputBox" and event == "output" then
+          log.info("Dumping log to", output)
+
+          logging.dump_log(output)
+        end
+
+        timer = os.startTimer(timer_timeout)
+      elseif event == "clear" then
+        logging.clear_error()
+        logging.clear_warn()
+        log.info("Cleared errors and warnings.")
       end
+    elseif object == "timeout" then
+      timer = os.startTimer(timer_timeout)
     end
   end
 
@@ -1345,10 +1378,12 @@ local function main_menu()
 
   log.info("Start main menu")
 
-  local menu_timer_timeout = 5
+  local menu_timer_timeout = 1
   local menu_timer = os.startTimer(menu_timer_timeout)
 
   local selection, scroll = 1, 1
+
+  local blinky = false
 
   while true do
     local description = ("Select an option from the list below.\n\nTotal items moved: %d\nTotal connections: %d\n\nUpdate rate: Every %d tick%s\nRunning: %s")
@@ -1369,7 +1404,7 @@ local function main_menu()
     info_box(win, "Main Menu", description, 8)
 
     -- Create the selection box.
-    outlined_selection_box(win, 4, 12, width - 6, height - 12, {
+    outlined_selection_box(win, 4, 13, width - 6, height - 13, {
       update_connections,
       update_rate,
       nickname,
@@ -1385,6 +1420,20 @@ local function main_menu()
 
       PrimeUI.resolve("timeout")
     end)
+
+    if logging.has_errored() or logging.has_warned() then
+      if blinky then
+        local color = logging.has_errored() and colors.red or colors.orange
+        win.setBackgroundColor(color)
+
+        win.setCursorPos(4, height - 2)
+        win.write(' ')
+
+        win.setCursorPos(width - 3, height - 2)
+        win.write(' ')
+      end
+    end
+
 
     local object, event, selected, _selection, _scroll = PrimeUI.run()
     log.debug("Selected", selected)
@@ -1416,6 +1465,7 @@ local function main_menu()
     elseif object == "timeout" then
       save()
       menu_timer = os.startTimer(menu_timer_timeout)
+      blinky = not blinky
     end
   end
 end
@@ -1744,6 +1794,16 @@ local function _run_connection_impl(connection)
 
   -- If we made it here, neither the origin or all destinations are inventories.
   -- Thus, fail.
+
+  if not peripheral.isPresent(to[1]) then
+    backend_log.error("Connection", connection.name, "could not be run: destination peripheral is missing.")
+    return
+  end
+
+  if not peripheral.isPresent(from) and not peripheral.hasType(to[1], "inventory") then
+    backend_log.error("Connection", connection.name, "could not be run: origin peripheral is missing.")
+  end
+
   backend_log.error("Connection", connection.name, "could not be run: could not select a valid path. Consider using a buffer chest.")
 end
 
