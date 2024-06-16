@@ -980,6 +980,68 @@ local function connections_remove_menu()
   end
 end
 
+local function toggle_connections_menu()
+  log.debug("Toggle connections")
+
+  local win = window.create(term.current(), 1, 1, term.getSize())
+  local width, height = win.getSize()
+
+  local connection_names = {}
+
+  local selection, scroll = 1, 1
+
+  while true do
+    for i, v in ipairs(connections) do
+      connection_names[i] = v.moving and " on - " .. v.name or "off - " .. v.name
+    end
+
+    PrimeUI.clear()
+
+    -- Draw info box.
+    info_box(win, "Toggle Connections", "Press enter to toggle the moving state of all connections.\nPress backspace to exit.", 2)
+
+    local toggle_on = "Turn on all connections"
+    local toggle_off = "Turn off all connections"
+
+    -- Draw the selection box.
+    outlined_selection_box(win, 3, 6, width - 4, 5, {
+      toggle_on,
+      toggle_off,
+      table.unpack(connection_names)
+    }, "selection", nil, colors.white, colors.black, selection, scroll)
+
+    PrimeUI.keyAction(keys.backspace, "exit")
+
+    local object, event, selected, _selection, _scroll = PrimeUI.run()
+
+    if object == "selectionBox" then
+      if selected == toggle_on or selected == toggle_off then
+        for _, v in ipairs(connections) do
+          v.moving = selected == toggle_on
+        end
+        log.debug("Turned all connections", selected == toggle_on and "on." or "off.")
+      else
+        local actual_selection = selected:gsub("^ on - ", ""):gsub("^off - ", "")
+        for _, v in ipairs(connections) do
+          if v.name == actual_selection then
+            v.moving = not v.moving
+            log.debug("Toggled connection", v.name, "to", v.moving and "on." or "off.")
+            break
+          end
+        end
+      end
+
+      selection = _selection
+      scroll = _scroll
+      save()
+    elseif object == "keyAction" and event == "exit" then
+      save()
+      log.debug("Exiting toggle connections menu.")
+      return
+    end
+  end
+end
+
 --- Connections menu
 local function connections_main_menu()
   --[[
@@ -1009,14 +1071,16 @@ local function connections_main_menu()
     local add_connection = "Add Connection"
     local edit_connection = "Edit Connection"
     local filter_connection = "Edit Connection Filter"
+    local toggle_connections = "Toggle Connections"
     local remove_connection = "Remove Connection"
     local go_back = "Go Back"
 
     -- Draw the selection box.
-    outlined_selection_box(win, 3, 6, width - 4, 5, {
+    outlined_selection_box(win, 3, 6, width - 4, 6, {
       add_connection,
       edit_connection,
       filter_connection,
+      toggle_connections,
       remove_connection,
       go_back
     }, "selection", nil, colors.white, colors.black, 1, 1)
@@ -1032,6 +1096,8 @@ local function connections_main_menu()
         connections_edit_menu()
       elseif selected == filter_connection then
         connections_filter_menu()
+      elseif selected == toggle_connections then
+        toggle_connections_menu()
       elseif selected == remove_connection then
         connections_remove_menu()
       elseif selected == go_back then
@@ -1423,7 +1489,7 @@ local function process_inventory_requests()
     processing_inventory_requests = true
 
     while inventory_request_queue[1] do
-      local request = inventory_request_queue[1]
+      local request = table.remove(inventory_request_queue, 1)
       local count = #request.funcs
 
       if current_n + count > max_inventory_requests + max_inventory_requests_overflow then
@@ -1439,10 +1505,15 @@ local function process_inventory_requests()
       current_n = current_n + count
     end
 
-    process_queue()
+    -- We still technically need to do some processing after this, but at this
+    -- point, we need the event to resume the queueing process.
     processing_inventory_requests = false
 
-    os.pullEvent("inventory_request:new") -- Wait for new requests
+    -- Process the final request and wait for a new one.
+    parallel.waitForAll(
+      process_queue,
+      function() os.pullEvent("inventory_request:new") end
+    )
   end
 end
 
@@ -1461,9 +1532,11 @@ local function make_inventory_request(funcs)
 
   -- If we are not currently processing inventory requests, queue a new event to start the process.
   if not processing_inventory_requests then
+    backend_log.debug("Queueing new inventory request event")
     os.queueEvent("inventory_request:new")
   end
 
+  backend_log.debug("Waiting for inventory request", id, "to complete.")
   -- Wait for the results to be filled in.
   os.pullEvent("inventory_request:" .. id)
 
@@ -1640,9 +1713,11 @@ local function _run_connection_to_inventory(connection)
 
   for i = 1, size do
     funcs[#funcs + 1] = function()
-      local moved = inv.pullItems(from, i)
+      local ok, moved = pcall(inv.pullItems, from, i)
 
-      items_moved = items_moved + moved  -- track the number of items moved.
+      if ok then
+        items_moved = items_moved + moved  -- track the number of items moved.
+      end
     end
   end
 
@@ -1658,16 +1733,18 @@ local function _run_connection_impl(connection)
   -- First, we need to check if our from node is an inventory.
   if peripheral.hasType(from, "inventory") then
     _run_connection_from_origin(connection)
+    return
   end
 
   -- Next check is if the first output node is any inventory.
   if peripheral.hasType(to[1], "inventory") then
     _run_connection_to_inventory(connection)
+    return
   end
 
   -- If we made it here, neither the origin or all destinations are inventories.
   -- Thus, fail.
-  backend_log.error("Connection", connection.name, " could not be run: could not select a valid path. Consider using a buffer chest.")
+  backend_log.error("Connection", connection.name, "could not be run: could not select a valid path. Consider using a buffer chest.")
 end
 
 --- Run the rules of a connection.
@@ -1689,13 +1766,16 @@ local function backend()
       -- Only spawn a new thread if the connection has finished running.
       if known_ids[id] then
         if not thready.is_alive(known_ids[id]) then
+          backend_log.debug("Restarting connection", connection.name)
           known_ids[id] = thready.spawn("connection_runners", function() run_connection(connection) end)
+          backend_log.debug("Connection", connection.name, "was restarted.")
         else
           backend_log.warn("Connection", connection.name, "took too long, and was skipped on this cycle.")
         end
       else
         -- ... Or never ran yet.
         known_ids[id] = thready.spawn("connection_runners", function() run_connection(connection) end)
+        backend_log.debug("Connection", connection.name, "was started.")
       end
     end
 
