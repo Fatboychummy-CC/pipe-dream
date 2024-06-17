@@ -302,6 +302,7 @@ end
 ---@param history string[]|nil A list of previous entries to provide
 ---@param completion function|nil A function to call to provide completion
 ---@param default string|nil A string to return if the box is empty
+---@return string[] buffer The list of characters typed.
 function PrimeUI.inputBox(win, x, y, width, action, fgColor, bgColor, replacement, history, completion, default, disabled)
     expect(1, win, "table")
     expect(2, x, "number")
@@ -320,11 +321,20 @@ function PrimeUI.inputBox(win, x, y, width, action, fgColor, bgColor, replacemen
     box.setBackgroundColor(bgColor)
     box.clear()
 
+    local buffer = {}
+
+    -- If there's a default value, add it to the buffer.
+    if default then
+        for char in default:gmatch(".") do
+            table.insert(buffer, char)
+        end
+    end
+
     -- If disabled, just draw the default text.
     if disabled then
         box.setCursorPos(1, 1)
         box.write(default or "")
-        return
+        return buffer
     end
 
     -- Call read() in a new coroutine.
@@ -335,23 +345,76 @@ function PrimeUI.inputBox(win, x, y, width, action, fgColor, bgColor, replacemen
         local old = term.redirect(box)
         local ok, res = coroutine.resume(coro, replacement, history, completion, default)
         term.redirect(old)
-        -- Run the coroutine until it finishes.
-        while coroutine.status(coro) ~= "dead" do
-            -- Get the next event.
-            local ev = table.pack(os.pullEvent())
-            -- Redirect and resume.
-            old = term.redirect(box)
-            ok, res = coroutine.resume(coro, table.unpack(ev, 1, ev.n))
-            term.redirect(old)
-            -- Pass any errors along.
-            if not ok then error(res) end
-        end
+
+        local running = true
+
+        -- Due to the way `parallel` orders its input functions, the 'read'
+        -- coroutine function should finish, set `running` to false, then
+        -- immediately afterwards the 'getlocal' function should run once to
+        -- finalize the buffer before itself also exiting.
+        -- We want this last finalization step, which is why we use `waitForAll`
+        -- instead of `waitForAny`.
+        --
+        -- ... Do we? The last user input should be the enter key, which won't
+        -- change anything.
+        -- Something to think on.
+        parallel.waitForAll(
+            function()
+                -- Run the coroutine until it finishes.
+                while coroutine.status(coro) ~= "dead" do
+                    -- Get the next event.
+                    local ev = table.pack(os.pullEvent())
+                    -- Redirect and resume.
+                    old = term.redirect(box)
+                    ok, res = coroutine.resume(coro, table.unpack(ev, 1, ev.n))
+                    term.redirect(old)
+                    -- Pass any errors along.
+                    if not ok then error(res) end
+                end
+
+                running = false
+            end,
+            function()
+                -- Locate "sLine" on the stack.
+                local stack, level
+                for i = 1, 10 do
+                    if debug.getinfo(i) then
+                        for j = 1, 10 do
+                            local name = debug.getlocal(i, j)
+                            if name == "sLine" then
+                                stack, level = i, j
+                                break
+                            end
+                        end
+                    end
+                end
+
+                -- Every time the buffer changes, update the value of sLine.
+                while running do
+                    os.pullEvent()
+                    local _, value = debug.getlocal(stack, level)
+                    if value then
+                        -- first, clear the buffer
+                        while buffer[1] do
+                            table.remove(buffer)
+                        end
+
+                        -- then, add each character to the buffer
+                        for char in value:gmatch(".") do
+                            table.insert(buffer, char)
+                        end
+                    end
+                end
+            end
+        )
         -- Send the result to the receiver.
         if type(action) == "string" then PrimeUI.resolve("inputBox", action, res)
         else action(res) end
         -- Spin forever, because tasks cannot exit.
         while true do os.pullEvent() end
     end)
+
+    return buffer
 end
 
 return PrimeUI
