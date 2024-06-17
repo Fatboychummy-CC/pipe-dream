@@ -389,6 +389,10 @@ function PrimeUI.inputBox(win, x, y, width, action, fgColor, bgColor, replacemen
                     end
                 end
 
+                if not stack or not level then
+                    error("PrimeUI inputBox: Could not find sLine on the stack.")
+                end
+
                 -- Every time the buffer changes, update the value of sLine.
                 while running do
                     os.pullEvent()
