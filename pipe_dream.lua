@@ -895,7 +895,7 @@ end
 --- Menu to add a new connection.
 local function connections_add_menu()
   log.debug("Add connection")
-  parallel.waitForAny(key_listener, _connections_edit_impl)
+  _connections_edit_impl()
 end
 
 --- A quick menu to select a connection, with a custom header.
@@ -948,9 +948,7 @@ local function connections_edit_menu()
   local connection = select_connection("Edit Connection", "Press enter to edit a connection.\nPress backspace to exit.")
 
   if connection then
-    parallel.waitForAny(key_listener, function()
-      _connections_edit_impl(connection)
-    end)
+    _connections_edit_impl(connection)
   end
 end
 
@@ -960,9 +958,7 @@ local function connections_filter_menu()
   local connection = select_connection("Edit Connection Filter", "Press enter to edit a connection's filter.\nPress backspace to exit.")
 
   if connection then
-    parallel.waitForAny(key_listener, function()
-      _connections_filter_edit_impl(connection)
-    end)
+    _connections_filter_edit_impl(connection)
   end
 end
 
@@ -1851,7 +1847,7 @@ local function frontend()
   end
 end
 
-local ok, err = pcall(thready.parallelAny, frontend, backend, process_inventory_requests)
+local ok, err = pcall(thready.parallelAny, frontend, backend, process_inventory_requests, key_listener)
 print() -- put the cursor back on the screen
 
 if not ok then
