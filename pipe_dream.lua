@@ -5,6 +5,8 @@ local file_helper = require "file_helper"
 local data_dir = file_helper:instanced("data")
 local logging = require "logging"
 
+logging.set_level(logging.LOG_LEVEL.DEBUG)
+
 local log = logging.create_context("pipe_dream")
 local logging_win
 do
@@ -15,12 +17,14 @@ do
 end
 
 local NICKNAMES_FILE = "nicknames.txt"
+local FLUID_MOVED_FILE = "fluid_moved.txt"
 local ITEMS_MOVED_FILE = "items_moved.txt"
 local CONNECTIONS_FILE = "connections.txt"
 local MOVING_ITEMS_FILE = "moving_items.txt"
 local UPDATE_TICKRATE_FILE = "update_tickrate.txt"
 
 local nicknames = data_dir:unserialize(NICKNAMES_FILE, {}) ---@type table<string, string>
+local fluid_moved = data_dir:unserialize(FLUID_MOVED_FILE, 0) ---@type integer
 local items_moved = data_dir:unserialize(ITEMS_MOVED_FILE, 0) ---@type integer
 local connections = data_dir:unserialize(CONNECTIONS_FILE, {}) ---@type Connection[]
 local moving_items = data_dir:unserialize(MOVING_ITEMS_FILE, true) ---@type boolean
@@ -29,6 +33,7 @@ log.info("Loaded data (or created defaults).")
 
 local function save()
   data_dir:serialize(NICKNAMES_FILE, nicknames)
+  data_dir:serialize(FLUID_MOVED_FILE, fluid_moved)
   data_dir:serialize(ITEMS_MOVED_FILE, items_moved)
   data_dir:serialize(CONNECTIONS_FILE, connections)
   data_dir:serialize(MOVING_ITEMS_FILE, moving_items)
@@ -42,6 +47,12 @@ if type(items_moved) ~= "number" then
   log.warn("Items moved file is corrupted, resetting to 0.")
 end
 ---@cast items_moved number
+
+-- We are also fine if this value fails to load, as it will not break the program.
+if type(fluid_moved) ~= "number" then
+  fluid_moved = 0
+  log.warn("Fluid moved file is corrupted, resetting to 0.")
+end
 
 -- We are also fine if this value fails to load, as it will not break the program.
 if type(update_tickrate) ~= "number" then
@@ -188,7 +199,10 @@ local function unacceptable(_type, reason)
   PrimeUI.run()
 end
 
+---@type table<integer, true> A lookup table of keys that are currently held.
 local keys_held = {}
+
+--- Key listener thread. Waits for `key` or `key_up` events and updates the `keys_held` table.
 local function key_listener()
   keys_held = {} -- Reset the keys held when this method is called.
   while true do
@@ -819,9 +833,13 @@ local function _connections_edit_impl(connection_data)
     elseif object == "selectionBox" then
       if event == "select-origin" then
         local becomes_limited = not peripheral.hasType(cached_peripheral_list[selection], "inventory")
+          and not peripheral.hasType(cached_peripheral_list[selection], "fluid_storage")
 
         if becomes_limited and #_connection_data.to > 1 then
-          unacceptable("input", "The last request would make this connection limited, and would only be able to have one destination.\nRemove all but one destination and try again.")
+          unacceptable(
+            "input",
+            "The last request would make this connection limited, and would only be able to have one destination.\nRemove all but one destination and try again."
+          )
         else
           connection_limited = becomes_limited
           _connection_data.from = cached_peripheral_list[selection]
@@ -923,8 +941,17 @@ local function select_connection(title, body)
       connection_list = { "No connections" }
     end
 
-    outlined_selection_box(win, 3, 7, width - 4, 12, connection_list, "edit", nil, colors.white, colors.black, 1, 1)
-    PrimeUI.textBox(win, 3, 6, 13, 1, " Connections ", colors.purple)
+    outlined_selection_box(
+      win, 3, 7, width - 4, 12,
+      connection_list, "edit", nil,
+      colors.white, colors.black,
+      1, 1
+    )
+    PrimeUI.textBox(
+      win, 3, 6, 13, 1,
+      " Connections ",
+      colors.purple
+    )
 
     PrimeUI.keyAction(keys.backspace, "exit")
 
@@ -945,7 +972,10 @@ end
 --- Edit a connection
 local function connections_edit_menu()
   log.debug("Edit connection")
-  local connection = select_connection("Edit Connection", "Press enter to edit a connection.\nPress backspace to exit.")
+  local connection = select_connection(
+    "Edit Connection",
+    "Press enter to edit a connection.\nPress backspace to exit."
+  )
 
   if connection then
     _connections_edit_impl(connection)
@@ -955,7 +985,10 @@ end
 --- Edit whitelist/blacklist of a connection
 local function connections_filter_menu()
   log.debug("Edit connection filter")
-  local connection = select_connection("Edit Connection Filter", "Press enter to edit a connection's filter.\nPress backspace to exit.")
+  local connection = select_connection(
+    "Edit Connection Filter",
+    "Press enter to edit a connection's filter.\nPress backspace to exit."
+  )
 
   if connection then
     _connections_filter_edit_impl(connection)
@@ -964,7 +997,10 @@ end
 
 local function connections_remove_menu()
   log.debug("Remove connection")
-  local connection = select_connection("Remove Connection", "Press enter to remove a connection.\nPress backspace to exit.")
+  local connection = select_connection(
+    "Remove Connection",
+    "Press enter to remove a connection.\nPress backspace to exit."
+  )
 
   if connection and confirmation_menu("Remove Connection", "Are you sure you want to remove connection " .. tostring(connection.name) .. "?") then
     for i, v in ipairs(connections) do
@@ -994,17 +1030,28 @@ local function toggle_connections_menu()
     PrimeUI.clear()
 
     -- Draw info box.
-    info_box(win, "Toggle Connections", "Press enter to toggle the moving state of all connections.\nPress backspace to exit.", 2)
+    info_box(
+      win,
+      "Toggle Connections",
+      "Press enter to toggle the moving state of all connections.\nPress backspace to exit.",
+      2
+    )
 
     local toggle_on = "Turn on all connections"
     local toggle_off = "Turn off all connections"
 
     -- Draw the selection box.
-    outlined_selection_box(win, 3, 6, width - 4, 5, {
-      toggle_on,
-      toggle_off,
-      table.unpack(connection_names)
-    }, "selection", nil, colors.white, colors.black, selection, scroll)
+    outlined_selection_box(
+      win, 3, 6, width - 4, 5,
+      {
+        toggle_on,
+        toggle_off,
+        table.unpack(connection_names)
+      },
+      "selection", nil,
+      colors.white, colors.black,
+      selection, scroll
+    )
 
     PrimeUI.keyAction(keys.backspace, "exit")
 
@@ -1382,9 +1429,10 @@ local function main_menu()
   local blinky = false
 
   while true do
-    local description = ("Select an option from the list below.\n\nTotal items moved: %d\nTotal connections: %d\n\nUpdate rate: Every %d tick%s\nRunning: %s")
+    local description = ("Select an option from the list below.\n\nTotal items moved: %d\nTotal fluid moved: %d mB\nTotal connections: %d\n\nUpdate rate: Every %d tick%s\nRunning: %s")
         :format(
           items_moved,
+          fluid_moved,
           #connections,
           update_tickrate,
           update_tickrate == 1 and "" or "s",
@@ -1631,14 +1679,15 @@ local function _run_connection_from_origin(connection)
   local from = connection.from
   local to = connection.to
 
-  local inv = peripheral.wrap(from) --[[@as Inventory?]]
+  local inv = peripheral.wrap(from) --[[@as Inventory|FluidStorage?]]
 
   if not inv then
     backend_log.warn("Connection", connection.name, "failed to run: origin peripheral is missing.")
     return
   end
 
-  local inv_contents = inv.list()
+  local inv_contents = inv.list and inv.list()
+  local inv_tanks = inv.tanks and inv.tanks()
 
   -- If the inventory is empty, we can't do anything.
   if not next(inv_contents) then
@@ -1650,17 +1699,36 @@ local function _run_connection_from_origin(connection)
   if mode == "1234" then
     -- Iterate through each inventory, and push whatever remains in the input inventory to the selected output.
     for _, output_inventory in ipairs(to) do
-      -- Queue up the items to move.
-      for slot, item in pairs(inv_contents) do
-        -- if items are left in this slot, and the item matches the filter, queue the move.
-        if item.count > 0 and can_move(item.name, filter, filter_mode) then
-          funcs[#funcs + 1] = function()
-            local moved = inv.pushItems(output_inventory, slot)
+      -- Queue up the items to move (if the origin is an item inventory)
+      if inv_contents then
+        for slot, item in pairs(inv_contents) do
+          -- if items are left in this slot, and the item matches the filter, queue the move.
+          if item.count > 0 and can_move(item.name, filter, filter_mode) then
+            funcs[#funcs + 1] = function()
+              local moved = inv.pushItems(output_inventory, slot)
 
-            items_moved = items_moved + moved  -- track the number of items moved.
+              items_moved = items_moved + moved  -- track the number of items moved.
 
-            if moved then
-              item.count = item.count - moved
+              if moved then
+                item.count = item.count - moved
+              end
+            end
+          end
+        end
+      end
+
+      -- Similarly, queue up fluids to move (if the origin is a fluid inventory)
+      if inv_tanks then
+        for tank, fluid in pairs(inv_tanks) do
+          if fluid.amount > 0 and can_move(fluid.name, filter, filter_mode) then
+            funcs[#funcs + 1] = function()
+              local moved = inv.pushFluid(output_inventory, tank)
+
+              fluid_moved = fluid_moved + moved  -- track the amount of fluid moved.
+
+              if moved then
+                fluid.amount = fluid.amount - moved
+              end
             end
           end
         end
