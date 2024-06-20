@@ -5,8 +5,6 @@ local file_helper = require "file_helper"
 local data_dir = file_helper:instanced("data")
 local logging = require "logging"
 
-logging.set_level(logging.LOG_LEVEL.DEBUG)
-
 local log = logging.create_context("pipe_dream")
 local logging_win
 do
