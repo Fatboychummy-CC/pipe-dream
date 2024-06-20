@@ -371,7 +371,6 @@ function PrimeUI.inputBox(win, x, y, width, action, fgColor, bgColor, replacemen
                     -- Pass any errors along.
                     if not ok then error(res) end
                 end
-                running = false
             end,
             function()
                 -- Locate "sLine" on the stack.
