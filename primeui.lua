@@ -346,8 +346,6 @@ function PrimeUI.inputBox(win, x, y, width, action, fgColor, bgColor, replacemen
         local ok, res = coroutine.resume(coro, replacement, history, completion, default)
         term.redirect(old)
 
-        local running = true
-
         -- Due to the way `parallel` orders its input functions, the 'read'
         -- coroutine function should finish, set `running` to false, then
         -- immediately afterwards the 'getlocal' function should run once to
@@ -358,29 +356,31 @@ function PrimeUI.inputBox(win, x, y, width, action, fgColor, bgColor, replacemen
         -- ... Do we? The last user input should be the enter key, which won't
         -- change anything.
         -- Something to think on.
-        parallel.waitForAll(
+        parallel.waitForAny(
             function()
                 -- Run the coroutine until it finishes.
                 while coroutine.status(coro) ~= "dead" do
                     -- Get the next event.
                     local ev = table.pack(os.pullEvent())
+
                     -- Redirect and resume.
                     old = term.redirect(box)
                     ok, res = coroutine.resume(coro, table.unpack(ev, 1, ev.n))
                     term.redirect(old)
+
                     -- Pass any errors along.
                     if not ok then error(res) end
                 end
-
                 running = false
             end,
             function()
                 -- Locate "sLine" on the stack.
                 local stack, level
                 for i = 1, 10 do
-                    if debug.getinfo(i) then
+                    if debug.getinfo(coro, i) then
                         for j = 1, 10 do
-                            local name = debug.getlocal(i, j)
+                            local name = debug.getlocal(coro, i, j)
+
                             if name == "sLine" then
                                 stack, level = i, j
                                 break
@@ -394,9 +394,10 @@ function PrimeUI.inputBox(win, x, y, width, action, fgColor, bgColor, replacemen
                 end
 
                 -- Every time the buffer changes, update the value of sLine.
-                while running do
+                while true do
                     os.pullEvent()
-                    local _, value = debug.getlocal(stack, level)
+
+                    local _, value = debug.getlocal(coro, stack, level)
                     if value then
                         -- first, clear the buffer
                         while buffer[1] do
@@ -411,6 +412,7 @@ function PrimeUI.inputBox(win, x, y, width, action, fgColor, bgColor, replacemen
                 end
             end
         )
+
         -- Send the result to the receiver.
         if type(action) == "string" then PrimeUI.resolve("inputBox", action, res)
         else action(res) end

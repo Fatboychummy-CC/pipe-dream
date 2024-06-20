@@ -1350,9 +1350,6 @@ local function log_menu()
     logging_win.redraw() -- ensure it actually redraws.
   end
 
-  local timer_timeout = 0.5
-  local timer = os.startTimer(timer_timeout)
-
   while true do
     PrimeUI.clear()
     draw_main()
@@ -1360,14 +1357,6 @@ local function log_menu()
     PrimeUI.keyAction(keys.backspace, "exit")
     PrimeUI.keyAction(keys.enter, "dump")
     PrimeUI.keyAction(keys.c, "clear")
-
-    PrimeUI.addTask(function()
-      repeat
-        local _, timer_id = os.pullEvent("timer")
-      until timer_id == timer
-
-      PrimeUI.resolve("timeout")
-    end)
 
     local object, event = PrimeUI.run()
 
@@ -1392,15 +1381,11 @@ local function log_menu()
 
           logging.dump_log(output)
         end
-
-        timer = os.startTimer(timer_timeout)
       elseif event == "clear" then
         logging.clear_error()
         logging.clear_warn()
         log.info("Cleared errors and warnings.")
       end
-    elseif object == "timeout" then
-      timer = os.startTimer(timer_timeout)
     end
   end
 
@@ -1717,10 +1702,10 @@ local function _run_connection_from_origin(connection)
 
       -- Similarly, queue up fluids to move (if the origin is a fluid inventory)
       if inv_tanks then
-        for tank, fluid in pairs(inv_tanks) do
+        for _, fluid in pairs(inv_tanks) do
           if fluid.amount > 0 and can_move(fluid.name, filter, filter_mode) then
             funcs[#funcs + 1] = function()
-              local moved = inv.pushFluid(output_inventory, tank)
+              local moved = inv.pushFluid(output_inventory)
 
               fluid_moved = fluid_moved + moved  -- track the amount of fluid moved.
 
@@ -1747,13 +1732,27 @@ local function _run_connection_from_origin(connection)
     -- we have, then split it evenly between the output inventories.
     local item_counts = {}
 
-    for _, item in pairs(inv_contents) do
-      if can_move(item.name, filter, filter_mode) then
-        if not item_counts[item.name] then
-          item_counts[item.name] = 0
-        end
+    if inv_contents then
+      for _, item in pairs(inv_contents) do
+        if can_move(item.name, filter, filter_mode) then
+          if not item_counts[item.name] then
+            item_counts[item.name] = 0
+          end
 
-        item_counts[item.name] = item_counts[item.name] + item.count
+          item_counts[item.name] = item_counts[item.name] + item.count
+        end
+      end
+    end
+
+    if inv_tanks then
+      for _, fluid in pairs(inv_tanks) do
+        if can_move(fluid.name, filter, filter_mode) then
+          if not item_counts[fluid.name] then
+            item_counts[fluid.name] = 0
+          end
+
+          item_counts[fluid.name] = item_counts[fluid.name] + fluid.amount
+        end
       end
     end
 
@@ -1771,19 +1770,43 @@ local function _run_connection_from_origin(connection)
     -- We will repeat the process until we have moved all of the (current) items in the inventory.
     -- In theory this shouldn't be an infinite loop?
     while true do
-      for slot, item in pairs(inv_contents) do
-        if item.count > 0 and item_counts[item.name] then
-          funcs[#funcs + 1] = function()
-            local moved = inv.pushItems(to[1], slot, item_counts[item.name])
+      if inv_contents then
+        for slot, item in pairs(inv_contents) do
+          if item.count > 0 and item_counts[item.name] then
+            for _, output_inventory in ipairs(to) do
+              funcs[#funcs + 1] = function()
+                local moved = inv.pushItems(output_inventory, slot, item_counts[item.name])
 
-            items_moved = items_moved + moved  -- track the number of items moved.
+                items_moved = items_moved + moved  -- track the number of items moved.
 
-            if moved then
-              item.count = item.count - moved
+                if moved then
+                  item.count = item.count - moved
+                end
+              end
             end
           end
         end
       end
+
+      if inv_tanks then
+        for _, fluid in pairs(inv_tanks) do
+          if fluid.amount > 0 and item_counts[fluid.name] then
+            for _, output_inventory in ipairs(to) do
+              funcs[#funcs + 1] = function()
+                local moved = inv.pushFluid(output_inventory, item_counts[fluid.name])
+
+                fluid_moved = fluid_moved + moved  -- track the amount of fluid moved.
+
+                if moved then
+                  fluid.amount = fluid.amount - moved
+                end
+              end
+            end
+          end
+        end
+      end
+
+
 
       if #funcs == 0 then
         break -- we are done moving items.
@@ -1829,6 +1852,14 @@ local function _run_connection_to_inventory(connection)
 
       if ok then
         items_moved = items_moved + moved  -- track the number of items moved.
+      end
+    end
+
+    funcs[#funcs + 1] = function()
+      local ok, moved = pcall(inv.pullFluid, from, i)
+
+      if ok then
+        fluid_moved = fluid_moved + moved  -- track the amount of fluid moved.
       end
     end
   end
@@ -1913,13 +1944,17 @@ local function frontend()
   end
 end
 
-local ok, err = pcall(thready.parallelAny, frontend, backend, process_inventory_requests, key_listener)
+local ok, err = xpcall(function()
+  thready.parallelAny(frontend, backend, process_inventory_requests, key_listener)
+end, debug.traceback)
 print() -- put the cursor back on the screen
 
 if not ok then
   log.fatal(err)
   ---@diagnostic disable-next-line ITS A HEKKIN STRING
   unacceptable("error", err)
+
+  logging.dump_log("crash.log")
 
   ---@fixme add test mode if error was "Terminated" and user terminates the unacceptable prompt again.
 end
