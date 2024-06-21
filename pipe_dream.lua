@@ -353,6 +353,8 @@ local function _connections_filter_edit_impl(connection_data)
   local items = connection_data.filter_list
   local item_count = #items
 
+  table.sort(items)
+
   ---@type "add"|"view"|"remove"|nil The selected action.
   local selected
 
@@ -591,9 +593,11 @@ local function _connections_filter_edit_impl(connection_data)
     elseif object == "inputBox" then
       if event == "add-item" then
         if result and result ~= "" then
-          table.insert(connection_data.filter_list, result)
+          table.insert(items, result)
           item_count = item_count + 1
           log.debug("Added item", result, "to filter list for connection", connection_data.name)
+
+          table.sort(items)
         elseif result == "" then
           log.debug("Add empty item, ignored.")
         end
@@ -651,6 +655,7 @@ local function _connections_edit_impl(connection_data)
     moving = false, -- New connections will be disabled by default
     id = os.epoch("utc")
   }
+  local editing_con = false
   if connection_data then
     _connection_data.name = connection_data.name or _connection_data.name
     _connection_data.from = connection_data.from or _connection_data.from
@@ -662,6 +667,7 @@ local function _connections_edit_impl(connection_data)
     _connection_data.id = connection_data.id or _connection_data.id
 
     log.debug("Editing connection", _connection_data.name)
+    editing_con = true
   else
     log.debug("Creating new connection")
   end
@@ -674,8 +680,13 @@ local function _connections_edit_impl(connection_data)
   local cached_peripheral_list = get_peripherals()
   local expanded_section = 1
 
-  local periphs_with_nicknames = {}             -- predeclare so section_info can access it.
-  local destination_periphs_with_nicknames = {} -- predeclare so section_info can access it.
+  ---@type table<integer, {name: string, display: string}> The list of peripherals with their nicknames.
+  local periphs_with_nicknames = {}
+  ---@type table<integer, {name: string, display: string}> The list of peripherals with their nicknames.
+  local destination_periphs_with_nicknames = {}
+
+  local sorted_periphs = {}
+  local sorted_destinations = {}
 
 
   local section_infos = {
@@ -706,7 +717,7 @@ local function _connections_edit_impl(connection_data)
       object = "selection_box",
       args = {
         action = "select-origin",
-        items = periphs_with_nicknames,
+        items = sorted_periphs,
       },
       increment_on_enter = true,
       disable_when_limited = false,
@@ -723,7 +734,7 @@ local function _connections_edit_impl(connection_data)
       object = "selection_box",
       args = {
         action = "select-destination",
-        items = destination_periphs_with_nicknames,
+        items = sorted_destinations,
       },
       increment_on_enter = false,
       disable_when_limited = false,
@@ -811,21 +822,60 @@ local function _connections_edit_impl(connection_data)
     -- Add the peripherals to the list
     -- Step 1: Add the peripherals to the list
     for i, v in ipairs(cached_peripheral_list) do
-      periphs_with_nicknames[i] = nicknames[v] or v -- we can just outright add the nicknames here for this table.
+      -- we can just outright add the nicknames here for this table.
+      periphs_with_nicknames[i] = {
+        name = v,
+        display = nicknames[v] or v
+      }
       local found = false
 
       for j = 1, #_connection_data.to do
         if _connection_data.to[j] == v then
-          destination_periphs_with_nicknames[i] = j .. ". " .. periphs_with_nicknames[i]
+          destination_periphs_with_nicknames[i] = {
+            name = v,
+            display = j .. ". " .. periphs_with_nicknames[i].display
+          }
           found = true
           break
         end
       end
 
       if not found then
-        destination_periphs_with_nicknames[i] = periphs_with_nicknames[i]
+        destination_periphs_with_nicknames[i] = {
+          name = periphs_with_nicknames[i].name,
+          display = "   " .. periphs_with_nicknames[i].display
+        }
       end
     end
+
+    -- Step 2: Sort the peripheral lists.
+    table.sort(periphs_with_nicknames, function(a, b)
+      return a.display < b.display
+    end)
+    table.sort(destination_periphs_with_nicknames, function(a, b)
+      return a.display < b.display
+    end)
+
+    -- Step 3: Create the list of sorted peripherals.
+    -- 3.a) Clear the list
+    while sorted_periphs[1] do
+      table.remove(sorted_periphs)
+    end
+    while sorted_destinations[1] do
+      table.remove(sorted_destinations)
+    end
+
+    -- 3.b) Add the peripherals to the list
+    for i, v in ipairs(periphs_with_nicknames) do
+      sorted_periphs[i] = v.display
+    end
+    for i, v in ipairs(destination_periphs_with_nicknames) do
+      sorted_destinations[i] = v.display
+    end
+
+    -- ALL OF THIS WAS NEEDED JUST TO SORT THE PERIPHERALS WITH NICKNAMES
+    -- SO THAT I COULD STILL REFERENCE THEM BY THEIR ORIGINAL NAME LATER
+    -- AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAHHHHHH
 
     -- Begin drawing
     clear()
@@ -833,7 +883,7 @@ local function _connections_edit_impl(connection_data)
     -- Draw info box.
     info_box(
       main_win,
-      "Add Connection",
+      editing_con and "Edit Connection" or "Add Connection",
       connection_limited and section_info.connection_limited_info or section_info.info,
       3
     )
@@ -973,8 +1023,8 @@ local function _connections_edit_impl(connection_data)
       end
     elseif object == "selectionBox" then
       if event == "select-origin" then
-        local becomes_limited = not peripheral.hasType(cached_peripheral_list[selection], "inventory")
-          and not peripheral.hasType(cached_peripheral_list[selection], "fluid_storage")
+        local becomes_limited = not peripheral.hasType(periphs_with_nicknames[selection].name, "inventory")
+          and not peripheral.hasType(periphs_with_nicknames[selection].name, "fluid_storage")
 
         if becomes_limited and #_connection_data.to > 1 then
           unacceptable(
@@ -983,9 +1033,9 @@ local function _connections_edit_impl(connection_data)
           )
         else
           connection_limited = becomes_limited
-          _connection_data.from = cached_peripheral_list[selection]
+          _connection_data.from = periphs_with_nicknames[selection].name
           section_info.name = "Origin - " .. result
-          log.debug("Selected origin", _connection_data.from)
+          log.debug("Selected origin", sorted_periphs[selection], "-", _connection_data.from)
         end
       elseif event == "select-destination" then
         -- Insert the peripheral into the list of destinations.
@@ -993,10 +1043,10 @@ local function _connections_edit_impl(connection_data)
         local found = false
 
         for i = 1, #_connection_data.to do
-          if _connection_data.to[i] == cached_peripheral_list[selection] then
+          if _connection_data.to[i] == destination_periphs_with_nicknames[selection].name then
             table.remove(_connection_data.to, i)
             found = true
-            log.debug("Removed destination", cached_peripheral_list[selection])
+            log.debug("Removed destination", sorted_destinations[selection], "-", destination_periphs_with_nicknames[selection].name)
             break
           end
         end
@@ -1011,8 +1061,8 @@ local function _connections_edit_impl(connection_data)
           )
         else
           if not found then
-            table.insert(_connection_data.to, cached_peripheral_list[selection])
-            log.debug("Added destination", cached_peripheral_list[selection])
+            table.insert(_connection_data.to, destination_periphs_with_nicknames[selection].name)
+            log.debug("Added destination", sorted_destinations[selection], "-", destination_periphs_with_nicknames[selection].name)
           end
 
           if #_connection_data.to == 0 then
@@ -1079,6 +1129,8 @@ local function select_connection(title, body, filter_func, override_no_connectio
   if #connection_list == 0 then
     connection_list = { override_no_connections or "No connections" }
   end
+
+  table.sort(connection_list)
 
   log.debug("Select a connection")
 
@@ -1185,13 +1237,33 @@ local function toggle_connections_menu()
   log.debug("Toggle connections")
 
   local connection_names = {}
+  local connection_list = {}
+
+  for i, v in ipairs(connections) do
+    connection_list[i] = v.name
+  end
+
+  table.sort(connection_list)
+
+  local function get_connection(name)
+    for _, v in ipairs(connections) do
+      if v.name == name then
+        return v
+      end
+    end
+  end
+
+  local function update_connection_list()
+    for i, name in ipairs(connection_list) do
+      local connection = get_connection(name)
+      connection_names[i] = (connection.moving and " on - " or "off - ") .. connection.name
+    end
+  end
 
   local selection, scroll = 1, 1
 
   while true do
-    for i, v in ipairs(connections) do
-      connection_names[i] = v.moving and " on - " .. v.name or "off - " .. v.name
-    end
+    update_connection_list()
 
     clear()
 
@@ -1200,7 +1272,7 @@ local function toggle_connections_menu()
       main_win,
       "Toggle Connections",
       "Press enter to toggle the moving state of all connections.\nPress shift+tab to exit.",
-      2
+      3
     )
 
     local toggle_on = "Turn on all connections"
@@ -1208,7 +1280,7 @@ local function toggle_connections_menu()
 
     -- Draw the selection box.
     outlined_selection_box(
-      main_win, 3, 6, width - 4, 5,
+      main_win, 3, 8, width - 4, 11,
       {
         toggle_on,
         toggle_off,
@@ -1231,13 +1303,12 @@ local function toggle_connections_menu()
         end
         log.debug("Turned all connections", selected == toggle_on and "on." or "off.")
       else
-        local actual_selection = selected:gsub("^ on - ", ""):gsub("^off - ", "")
-        for _, v in ipairs(connections) do
-          if v.name == actual_selection then
-            v.moving = not v.moving
-            log.debug("Toggled connection", v.name, "to", v.moving and "on." or "off.")
-            break
-          end
+        local actual_selection = _selection - 2
+        local connection = get_connection(connection_list[actual_selection])
+
+        if connection then
+          connection.moving = not connection.moving
+          log.debug("Toggled connection", connection.name, "to", connection.moving and "on." or "off.")
         end
       end
 
@@ -1440,6 +1511,7 @@ local function nickname_menu()
     if #cached_peripheral_list == 0 then
       cached_peripheral_list = { "No peripherals" }
     end
+    table.sort(cached_peripheral_list)
 
     outlined_selection_box(
       main_win,
