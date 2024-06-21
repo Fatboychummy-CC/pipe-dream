@@ -6,17 +6,17 @@ local logging = require "logging"
 
 local data_dir = file_helper:instanced("data")
 local log = logging.create_context("pipe_dream")
-local logging_win
-local main_win = window.create(term.current(), 1, 1, term.getSize())
-local width, height = term.getSize()
 
 
 if ... == "debug" then
   logging.set_level(logging.LOG_LEVEL.DEBUG)
 end
 
-logging_win = window.create(term.current(), 3, 8, width - 4, height - 7)
-logging_win.setVisible(false)
+local main_win = window.create(term.current(), 1, 1, term.getSize())
+local width, height = term.getSize()
+local logging_display_win = window.create(term.current(), 3, 8, width - 4, height - 8)
+local logging_win = window.create(logging_display_win, 1, 1, width - 4, height - 7)
+logging_display_win.setVisible(false)
 main_win.setVisible(false)
 logging.set_window(logging_win)
 
@@ -182,6 +182,7 @@ end
 --- Clear the screen buffer and ready it for drawing.
 local function clear()
   main_win.setVisible(false)
+  main_win.setBackgroundColor(colors.black)
   main_win.clear()
   PrimeUI.clear()
 end
@@ -1549,16 +1550,8 @@ local function log_menu()
 
   local function draw_log()
     -- Draw the log window
-    logging_win.setVisible(true)
-    logging_win.redraw() -- ensure it actually redraws.
-
-    -- Ensure the bottom of box is drawn, since we make the log window 1 line taller
-    -- than is needed (print leaves a blank line at the end of the log, that we don't
-    -- want).
-    main_win.setCursorPos(3, height)
-    main_win.setBackgroundColor(colors.black)
-    main_win.setTextColor(colors.white)
-    main_win.write(("\x8c"):rep(width - 4))
+    logging_display_win.setVisible(true)
+    logging_display_win.redraw() -- ensure it actually redraws.
   end
 
   while true do
@@ -1615,7 +1608,7 @@ local function log_menu()
   end
 
   -- Hide the log window
-  logging_win.setVisible(false)
+  logging_display_win.setVisible(false)
 end
 
 --- Main menu
@@ -1646,8 +1639,6 @@ local function main_menu()
           update_tickrate == 1 and "" or "s",
           moving_items and "Yes" or "No"
         )
-
-    main_win.setBackgroundColor(colors.black)
     clear()
 
     -- Create the information box.
