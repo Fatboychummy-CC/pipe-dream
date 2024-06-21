@@ -28,8 +28,8 @@ Controls for each section are usually at the top of the page, but for the most
 part you can use shift+tab to go back, tab to go forward, enter to confirm, and
 the arrow keys to navigate.
 
-See the [wiki](https://github.com/Fatboychummy-CC/pipe-dream/wiki) for more
-information on how to use Pipe Dream.
+See the [wiki](https://github.com/Fatboychummy-CC/pipe-dream/wiki) (not yet set
+up) for more information on how to use Pipe Dream.
 
 ## License
 
