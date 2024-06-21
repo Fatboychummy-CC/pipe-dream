@@ -134,6 +134,7 @@ end
 ---@param completion_func nil|fun(text: string): string[] The function to call for completion.
 ---@param default string? The default text to display in the input box.
 ---@param disabled boolean? Whether the box is disabled (displayed, but not interactable).
+---@return string[] buffer The input buffer.
 local function outlined_input_box(win, x, y, width, action, fg_color, bg_color, replacement, history, completion_func,
                                   default, disabled)
   -- Input box with border
@@ -618,6 +619,7 @@ local function _connections_edit_impl(connection_data)
       },
       increment_on_enter = true,
       disable_when_limited = false,
+      save_buffer = "name",
     },
     {
       name = (
@@ -633,6 +635,7 @@ local function _connections_edit_impl(connection_data)
       },
       increment_on_enter = true,
       disable_when_limited = false,
+      save_buffer = false,
     },
     {
       name = (
@@ -649,6 +652,7 @@ local function _connections_edit_impl(connection_data)
       },
       increment_on_enter = false,
       disable_when_limited = false,
+      save_buffer = false,
     },
     {
       name = (
@@ -665,6 +669,7 @@ local function _connections_edit_impl(connection_data)
       },
       increment_on_enter = true,
       disable_when_limited = true,
+      save_buffer = false,
     },
     {
       name = (
@@ -681,6 +686,7 @@ local function _connections_edit_impl(connection_data)
       },
       increment_on_enter = true,
       disable_when_limited = true,
+      save_buffer = false,
     }
   }
 
@@ -754,6 +760,8 @@ local function _connections_edit_impl(connection_data)
 
     local y = 8
 
+    local input_box_buffer
+
     -- Draw the sections
     for i = 1, #section_infos do
       local section = section_infos[i]
@@ -772,7 +780,7 @@ local function _connections_edit_impl(connection_data)
 
         if object == "input_box" then
           -- Input box
-          outlined_input_box(win, 3, y, width - 4, args.action, colors.white, colors.black, nil, nil, nil, args.default)
+          input_box_buffer = outlined_input_box(win, 3, y, width - 4, args.action, colors.white, colors.black, nil, nil, nil, args.default)
         elseif object == "selection_box" then
           -- Selection box
 
@@ -817,6 +825,23 @@ local function _connections_edit_impl(connection_data)
           end
         else
           log.debug("Advance a section.")
+
+          if section_info.save_buffer then
+            _connection_data[section_info.save_buffer] = table.concat(input_box_buffer)
+
+            if type(section_info[section_info.save_buffer]) ~= "string" then
+              error(
+                "Tried to set a non-string value to a string buffer: "
+                .. tostring(section_info.save_buffer)
+                .. " - "
+                .. type(section_info[section_info.save_buffer])
+              )
+            end
+
+            ---@diagnostic disable-next-line: param-type-mismatch we check this case directly above.
+            section_info[section_info.save_buffer] = section_info[section_info.save_buffer]:gsub(" ?%-.+", "") .. " - " .. _connection_data[section_info.save_buffer]
+          end
+
           expanded_section = expanded_section + 1
           if expanded_section > #section_infos then
             if save_connection() then
