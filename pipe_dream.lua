@@ -374,11 +374,10 @@ local function _connections_filter_edit_impl(connection_data)
   ---@type 1|-1 The direction to swap to scrolling after the edge pause.
   local next_scroll_direction = 1
 
-  local add_item, view_items, remove_item, toggle_mode, go_back = "Add item",
+  local add_item, view_items, remove_item, toggle_mode = "Add item",
     "View items",
     "Remove item",
-    "Toggle blacklist/whitelist",
-    "Save and exit"
+    "Toggle blacklist/whitelist"
 
   local timer = os.startTimer(0.5)
 
@@ -427,27 +426,28 @@ local function _connections_filter_edit_impl(connection_data)
       items_y = 6
       items_height = 13
     else
-      items_y = 10
-      items_height = 9
+      items_y = 13
+      items_height = 6
+
+      info_box(
+        main_win,
+        "Filter - " .. connection_data.name,
+        "Select an action to perform on the filter list.\nPress shift+tab to save and exit.",
+        2
+      )
 
       -- No info box, just put the selection box in.
       outlined_selection_box(
-        main_win, 3, 3, width - 4, 5,
+        main_win, 3, 7, width - 4, 4,
           {
           add_item,
           view_items,
           remove_item,
-          toggle_mode,
-          go_back
+          toggle_mode
         },
         "select", "select-change",
         colors.white, colors.black,
         main_selected, main_scroll
-      )
-      PrimeUI.textBox(
-        main_win, 3, 2, 11 + #connection_data.name, 1,
-        " Filter - " .. connection_data.name,
-        colors.purple
       )
     end
 
@@ -519,11 +519,6 @@ local function _connections_filter_edit_impl(connection_data)
         elseif result == toggle_mode then
           connection_data.filter_mode = connection_data.filter_mode == "whitelist" and "blacklist" or "whitelist"
           log.debug("Toggled filter mode to", connection_data.filter_mode)
-        elseif result == go_back then
-          save()
-
-          log.debug("Exiting filter edit for connection", connection_data.name)
-          return
         end
       elseif event == "select-item" then
         if selected == "remove" then
