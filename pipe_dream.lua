@@ -1647,6 +1647,7 @@ local function main_menu()
           moving_items and "Yes" or "No"
         )
 
+    main_win.setBackgroundColor(colors.black)
     clear()
 
     -- Create the information box.
