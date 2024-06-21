@@ -11,6 +11,10 @@ local main_win = window.create(term.current(), 1, 1, term.getSize())
 local width, height = term.getSize()
 
 
+if ... == "debug" then
+  logging.set_level(logging.LOG_LEVEL.DEBUG)
+end
+
 logging_win = window.create(term.current(), 3, 8, width - 4, height - 7)
 logging_win.setVisible(false)
 main_win.setVisible(false)
@@ -1873,7 +1877,8 @@ local function _run_connection_from_origin(connection)
   local inv_tanks = inv.tanks and inv.tanks()
 
   -- If the inventory is empty, we can't do anything.
-  if not next(inv_contents) then
+  if inv_contents and not next(inv_contents)
+    and inv_tanks and not next(inv_tanks) then
     backend_log.debug("Connection", connection.name, "is empty, skipping.")
     return
   end
@@ -2033,16 +2038,24 @@ local function _run_connection_to_inventory(connection)
   -- create another connection from the `to` node with the filters applied.
   --
   -- As well, since we don't know the items inside or even the size, we will
-  -- call `pullItems` as many times as we have slots in `to`.
+  -- call `pullItems`/`pullFluid` as many times as we have slots in `to`.
 
-  local inv = peripheral.wrap(to) --[[@as Inventory?]]
+  local inv = peripheral.wrap(to) --[[@as Inventory|FluidStorage?]]
 
-  if not inv or not inv.list then
-    backend_log.error("Connection", connection.name, "failed to run: destination peripheral is missing or is not an inventory.")
+  if not inv then
+    backend_log.warn("Connection", connection.name, "failed to run: destination peripheral is missing.")
     return
   end
 
-  local size = inv.size()
+  local size, tanks = 0, 0
+
+  if inv.list then
+    size = inv.size()
+  end
+
+  if inv.tanks then
+    tanks = #inv.tanks()
+  end
 
   local funcs = {}
 
@@ -2054,9 +2067,11 @@ local function _run_connection_to_inventory(connection)
         items_moved = items_moved + moved  -- track the number of items moved.
       end
     end
+  end
 
+  for _ = 1, tanks do
     funcs[#funcs + 1] = function()
-      local ok, moved = pcall(inv.pullFluid, from, i)
+      local ok, moved = pcall(inv.pullFluid, from)
 
       if ok then
         fluid_moved = fluid_moved + moved  -- track the amount of fluid moved.
