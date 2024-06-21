@@ -1062,8 +1062,23 @@ end
 --- A quick menu to select a connection, with a custom header.
 ---@param title string The title of the menu.
 ---@param body string The body of the menu.
+---@param filter_func nil|fun(connection: Connection): boolean A function to filter connections.
+---@param override_no_connections string? The message to display if there are no connections.
 ---@return Connection? connection The connection selected, or nil if none was selected.
-local function select_connection(title, body)
+local function select_connection(title, body, filter_func, override_no_connections)
+  filter_func = filter_func or function() return true end
+
+  local connection_list = {}
+  for i, v in ipairs(connections) do
+    if filter_func(v) then
+      connection_list[#connection_list+1] = v.name
+    end
+  end
+
+  if #connection_list == 0 then
+    connection_list = { override_no_connections or "No connections" }
+  end
+
   log.debug("Select a connection")
 
   while true do
@@ -1071,15 +1086,6 @@ local function select_connection(title, body)
 
     -- Draw info box.
     info_box(main_win, title, body, 2)
-
-    local connection_list = {}
-    for i, v in ipairs(connections) do
-      connection_list[i] = v.name
-    end
-
-    if #connection_list == 0 then
-      connection_list = { "No connections" }
-    end
 
     outlined_selection_box(
       main_win, 3, 7, width - 4, 12,
@@ -1101,7 +1107,13 @@ local function select_connection(title, body)
     if object == "selectionBox" then
       if event == "edit" then
         log.debug("Selected connection", selection, "(", selected, ")")
-        return connections[selection]
+        for _, v in ipairs(connections) do
+          if v.name == selected then
+            return v
+          end
+        end
+
+        error("Selected connection not found in connections list.")
       end
     elseif object == "keyAction" and event == "exit" and shift_held() then
       log.debug("Exit connection selection.")
@@ -1128,7 +1140,18 @@ local function connections_filter_menu()
   log.debug("Edit connection filter")
   local connection = select_connection(
     "Edit Connection Filter",
-    "Press enter to edit a connection's filter.\nPress shift+tab to exit."
+    "Press enter to edit a connection's filter.\nPress shift+tab to exit.",
+    function(connection)
+      -- Filter out any connections that would be 'connection limited', or are not present.
+      local has_inv, has_fluid = peripheral.hasType(connection.from, "inventory"),
+        peripheral.hasType(connection.from, "fluid_storage")
+
+      -- If the peripheral is not present, both `has_inv` and `has_fluid` will be false.
+      -- Thus, we do not need another check for that.
+      -- added 'or false' to get warnings to go away.
+      return has_inv or has_fluid or false
+    end,
+    "No editable connections"
   )
 
   if connection then
@@ -1566,7 +1589,7 @@ local function log_menu()
           "output",
           colors.white, colors.black,
           nil, nil, nil,
-          "log.txt"
+          "latest.log"
         )
         PrimeUI.textBox(
           main_win, 4, 3, 10, 1,
