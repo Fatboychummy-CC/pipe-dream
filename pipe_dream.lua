@@ -1986,47 +1986,90 @@ local function _run_connection_from_origin(connection)
       item_counts[name] = split
     end
 
+    local moved_inventories = {}
+    for _, output_inventory in ipairs(to) do
+      for name in pairs(item_counts) do
+        if not moved_inventories[output_inventory] then
+          moved_inventories[output_inventory] = {}
+        end
+
+        moved_inventories[output_inventory][name] = 0
+      end
+    end
+
     -- Finally, we can start pushing items to the inventories.
     -- We will repeat the process until we have moved all of the (current) items in the inventory.
     -- In theory this shouldn't be an infinite loop?
     while true do
       if inv_contents then
-        for slot, item in pairs(inv_contents) do
-          if item.count > 0 and item_counts[item.name] then
-            for _, output_inventory in ipairs(to) do
-              funcs[#funcs + 1] = function()
-                local moved = inv.pushItems(output_inventory, slot, item_counts[item.name])
+        for _, output_inventory in ipairs(to) do
+          for slot, item in pairs(inv_contents) do
+            if item.count > 0 and item_counts[item.name] then
+              if item_counts[item.name] > moved_inventories[output_inventory][item.name] and item.count > 0 then
+                local to_move = math.min(item_counts[item.name] - moved_inventories[output_inventory][item.name], item.count)
+                backend_log.debug("Splitting", to_move, "of", item.name, "to", output_inventory)
 
-                items_moved = items_moved + moved  -- track the number of items moved.
+                funcs[#funcs + 1] = function()
+                  local moved = inv.pushItems(
+                    output_inventory,
+                    slot,
+                    to_move
+                  )
 
-                if moved then
-                  item.count = item.count - moved
-                end
-              end
-            end
-          end
-        end
-      end
+                  items_moved = items_moved + moved  -- track the number of items moved.
+                end -- end func
+
+                item.count = item.count - to_move
+
+                -- Update the amount of items moved to this inventory.
+                -- We will either be moving the remaining amount of items in the stack,
+                -- or we will be moving the amount of items we calculated to move.
+                -- Whatever is smaller.
+                moved_inventories[output_inventory][item.name] = moved_inventories[output_inventory][item.name]
+                  + to_move
+                backend_log.debug(
+                  "Remains:", item_counts[item.name] - moved_inventories[output_inventory][item.name],
+                  "Moved:", moved_inventories[output_inventory][item.name]
+                )
+              end -- end if item_counts
+            end -- end if item.count...
+          end -- end for pairs
+        end -- end for ipairs
+      end -- end if
 
       if inv_tanks then
-        for _, fluid in pairs(inv_tanks) do
-          if fluid.amount > 0 and item_counts[fluid.name] then
-            for _, output_inventory in ipairs(to) do
-              funcs[#funcs + 1] = function()
-                local moved = inv.pushFluid(output_inventory, item_counts[fluid.name])
+        for _, output_inventory in ipairs(to) do
+          for _, fluid in pairs(inv_tanks) do
+            if fluid.amount > 0 and item_counts[fluid.name] then
+              if item_counts[fluid.name] > moved_inventories[output_inventory][fluid.name] then
+                local to_move = math.min(item_counts[fluid.name] - moved_inventories[output_inventory][fluid.name], fluid.amount)
+                backend_log.debug("Splitting", to_move, "mB of", fluid.name, "to", output_inventory)
 
-                fluid_moved = fluid_moved + moved  -- track the amount of fluid moved.
+                funcs[#funcs + 1] = function()
+                  local moved = inv.pushFluid(
+                    output_inventory,
+                    to_move,
+                    fluid.name
+                  )
 
-                if moved then
-                  fluid.amount = fluid.amount - moved
-                end
-              end
-            end
-          end
-        end
-      end
+                  fluid_moved = fluid_moved + moved  -- track the amount of fluid moved.
+                end -- end func
 
+                fluid.amount = fluid.amount - to_move
 
+                -- Update the amount of fluid moved to this inventory.
+                -- Same reasoning as above.
+                moved_inventories[output_inventory][fluid.name] = moved_inventories[output_inventory] [fluid.name]
+                  + to_move
+                backend_log.debug(
+                  "Remains:", item_counts[fluid.name] - moved_inventories[output_inventory][fluid.name],
+                  "mB. Moved:", moved_inventories[output_inventory][fluid.name]
+                )
+              end -- end if item_counts...
+            end -- end if fluid.amount...
+          end -- end for pairs
+        end -- end for ipairs
+      end -- end if
 
       if #funcs == 0 then
         break -- we are done moving items.
