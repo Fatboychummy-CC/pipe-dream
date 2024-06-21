@@ -25,8 +25,8 @@ Follow the instructions on the screen to complete the installation.
 
 Pipe Dream is a GUI-based program, but all inputs are done using the keyboard.
 Controls for each section are usually at the top of the page, but for the most
-part you can use backspace to go back, enter to confirm, and the arrow keys to
-navigate.
+part you can use shift+tab to go back, tab to go forward, enter to confirm, and
+the arrow keys to navigate.
 
 See the [wiki](https://github.com/Fatboychummy-CC/pipe-dream/wiki) for more
 information on how to use Pipe Dream.
