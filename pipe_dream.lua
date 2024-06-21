@@ -1601,7 +1601,7 @@ local function main_menu()
     clear()
 
     -- Create the information box.
-    info_box(main_win, "Main Menu", description, 8)
+    info_box(main_win, "Pipe : Dream", description, 8)
 
     -- Create the selection box.
     outlined_selection_box(
