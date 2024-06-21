@@ -1,18 +1,21 @@
-local PrimeUI = require("primeui")
+local PrimeUI = require "primeui"
 
 local thready = require "thready"
 local file_helper = require "file_helper"
-local data_dir = file_helper:instanced("data")
 local logging = require "logging"
 
+local data_dir = file_helper:instanced("data")
 local log = logging.create_context("pipe_dream")
 local logging_win
-do
-  local width, height = term.getSize()
-  logging_win = window.create(term.current(), 3, 8, width - 4, height - 8)
-  logging_win.setVisible(false)
-  logging.set_window(logging_win)
-end
+local main_win = window.create(term.current(), 1, 1, term.getSize())
+local width, height = term.getSize()
+
+
+logging_win = window.create(term.current(), 3, 8, width - 4, height - 8)
+logging_win.setVisible(false)
+main_win.setVisible(false)
+logging.set_window(logging_win)
+
 
 local NICKNAMES_FILE = "nicknames.txt"
 local FLUID_MOVED_FILE = "fluid_moved.txt"
@@ -172,29 +175,51 @@ local function get_peripherals()
   return peripherals
 end
 
+--- Clear the screen buffer and ready it for drawing.
+local function clear()
+  main_win.setVisible(false)
+  main_win.clear()
+  PrimeUI.clear()
+end
+
 --- Display the unacceptable input screen.
 ---@param _type "error"|"input"|string The type of error.
 ---@param reason string The reason for the error.
 local function unacceptable(_type, reason)
-  local win = window.create(term.current(), 1, 1, term.getSize())
-
   log.warn("Unacceptable :", _type, ":", reason)
 
-  PrimeUI.clear()
+  clear()
 
   -- Draw info box.
   if _type == "error" then
-    info_box(win, "Error", ("An error occurred.\n%s\n\nPress enter to continue."):format(reason), 15, colors.red)
+    info_box(
+      main_win,
+      "Error",
+      ("An error occurred.\n%s\n\nPress enter to continue."):format(reason),
+      15,
+      colors.red
+    )
   elseif _type == "input" then
-    info_box(win, "Input Error", ("The last user input was unacceptable.\n%s\n\nPress enter to continue."):format(reason),
-      15, colors.red)
+    info_box(
+      main_win,
+      "Input Error",
+      ("The last user input was unacceptable.\n%s\n\nPress enter to continue."):format(reason),
+      15,
+      colors.red
+    )
   else
-    info_box(win, "Unknown Error", ("An unknown error occurred.\n%s\n\nPress enter to continue."):format(reason), 15,
-      colors.red)
+    info_box(
+      main_win,
+      "Unknown Error",
+      ("An unknown error occurred.\n%s\n\nPress enter to continue."):format(reason),
+      15,
+      colors.red
+    )
   end
 
   PrimeUI.keyAction(keys.enter, "exit")
 
+  main_win.setVisible(true)
   PrimeUI.run()
 end
 
@@ -256,22 +281,25 @@ end
 ---@param select_yes_default boolean? Whether the default selection is "Yes".
 ---@return boolean sure Whether the user is sure they want to exit without saving.
 local function confirmation_menu(title, body, select_yes_default)
-  local win = window.create(term.current(), 1, 1, term.getSize())
-  local width, height = win.getSize()
-
   while true do
-    PrimeUI.clear()
+    clear()
 
     -- Draw info box.
-    info_box(win, title, body, 2)
+    info_box(main_win, title, body, 2)
 
-    outlined_selection_box(win, 3, 7, width - 4, 2, {
-      "Yes",
-      "No"
-    }, "selection", nil, colors.white, colors.black, select_yes_default and 1 or 2, 1)
+    outlined_selection_box(
+      main_win, 3, 7, width - 4, 2,
+      {
+        "Yes",
+        "No"
+      }, "selection", nil,
+      colors.white, colors.black,
+      select_yes_default and 1 or 2, 1
+    )
 
     PrimeUI.keyAction(keys.backspace, "exit")
 
+    main_win.setVisible(true)
     local object, event, result = PrimeUI.run()
 
     if object == "selectionBox" then
@@ -287,7 +315,11 @@ end
 --- Ask the user if they're sure they want to exit without saving.
 ---@return boolean sure Whether the user is sure they want to exit without saving.
 local function confirm_exit_no_save()
-  return confirmation_menu("Exit Without Saving", "Are you sure you want to exit without saving?", false)
+  return confirmation_menu(
+    "Exit Without Saving",
+    "Are you sure you want to exit without saving?",
+    false
+  )
 end
 
 --- Implement the connection filter editing menu.
@@ -308,9 +340,6 @@ local function _connections_filter_edit_impl(connection_data)
   ]]
 
   log.debug("Editing filter for connection", connection_data.name)
-
-  local win = window.create(term.current(), 1, 1, term.getSize())
-  local width, height = win.getSize()
 
   local items = connection_data.filter_list
   local item_count = #items
@@ -334,29 +363,56 @@ local function _connections_filter_edit_impl(connection_data)
   ---@type 1|-1 The direction to swap to scrolling after the edge pause.
   local next_scroll_direction = 1
 
-  local add_item, view_items, remove_item, toggle_mode, go_back = "Add item", "View items", "Remove item", "Toggle blacklist/whitelist", "Save and exit"
+  local add_item, view_items, remove_item, toggle_mode, go_back = "Add item",
+    "View items",
+    "Remove item",
+    "Toggle blacklist/whitelist",
+    "Save and exit"
 
   local timer = os.startTimer(0.5)
 
   local no_items_toggle = true
 
   while true do
-    PrimeUI.clear()
+    clear()
 
     -- If we've selected something, we can draw the info box for it.
     if selected == "add" then
-      info_box(win, "Add item", "Enter the name of the item to add to the filter list, then press enter to confirm.", 2)
-      outlined_input_box(win, 3, 7, width - 4, "add-item", colors.white, colors.black)
-      PrimeUI.textBox(win, 3, 6, 11, 1, " Item Name ", colors.purple)
+      info_box(
+        main_win,
+        "Add item",
+        "Enter the name of the item to add to the filter list, then press enter to confirm.",
+        2
+      )
+      outlined_input_box(
+        main_win, 3, 7, width - 4,
+        "add-item",
+        colors.white, colors.black
+      )
+      PrimeUI.textBox(
+        main_win, 3, 6, 11, 1,
+        " Item Name ",
+        colors.purple
+      )
 
       items_y = 10
       items_height = 9
     elseif selected == "view" then
-      info_box(win, "View items", "Press backspace to go back.", 1)
+      info_box(
+        main_win,
+        "View items",
+        "Press backspace to go back.",
+        1
+      )
       items_y = 6
       items_height = 13
     elseif selected == "remove" then
-      info_box(win, "Remove item", "Select the item to remove from the filter list.", 1)
+      info_box(
+        main_win,
+        "Remove item",
+        "Select the item to remove from the filter list.",
+        1
+      )
       items_y = 6
       items_height = 13
     else
@@ -364,20 +420,30 @@ local function _connections_filter_edit_impl(connection_data)
       items_height = 9
 
       -- No info box, just put the selection box in.
-      outlined_selection_box(win, 3, 3, width - 4, 5, {
-        add_item,
-        view_items,
-        remove_item,
-        toggle_mode,
-        go_back
-      }, "select", "select-change", colors.white, colors.black, main_selected, main_scroll)
-      PrimeUI.textBox(win, 3, 2, 11 + #connection_data.name, 1, " Filter - " .. connection_data.name, colors.purple)
+      outlined_selection_box(
+        main_win, 3, 3, width - 4, 5,
+          {
+          add_item,
+          view_items,
+          remove_item,
+          toggle_mode,
+          go_back
+        },
+        "select", "select-change",
+        colors.white, colors.black,
+        main_selected, main_scroll
+      )
+      PrimeUI.textBox(
+        main_win, 3, 2, 11 + #connection_data.name, 1,
+        " Filter - " .. connection_data.name,
+        colors.purple
+      )
     end
 
     local enable_selector = selected == "view" or selected == "remove"
     -- Draw the preview selection box
     outlined_selection_box(
-      win,
+      main_win,
       3, items_y,
       width - 4, items_height,
       #items == 0 and { no_items_toggle and "No items" or "" } or items,
@@ -387,7 +453,7 @@ local function _connections_filter_edit_impl(connection_data)
       not enable_selector
     )
     PrimeUI.textBox(
-      win,
+      main_win,
       3, items_y - 1,
       2 + #connection_data.filter_mode, 1,
       ' ' .. connection_data.filter_mode .. ' ',
@@ -408,7 +474,7 @@ local function _connections_filter_edit_impl(connection_data)
       PrimeUI.keyAction(keys.backspace, "exit")
     end
 
-
+    main_win.setVisible(true)
     local object, event, result, selection, scroll_result = PrimeUI.run()
 
     local function reset_scroller()
@@ -451,7 +517,11 @@ local function _connections_filter_edit_impl(connection_data)
         end
       elseif event == "select-item" then
         if selected == "remove" then
-          if items[selection] and confirmation_menu("Remove item", "Are you sure you want to remove item " .. tostring(items[selection]) .. "?") then
+          -- Code cleanup: Declare the title and body outside of the if statement to reduce its size.
+          local title = "Remove item"
+          local body = "Are you sure you want to remove item " .. tostring(items[selection]) .. " from the filter list?"
+
+          if items[selection] and confirmation_menu(title, body) then
             log.debug("Remove item", items[selection], "from filter list for connection", connection_data.name)
 
             table.remove(items, selection)
@@ -595,9 +665,6 @@ local function _connections_edit_impl(connection_data)
 
   local cached_peripheral_list = get_peripherals()
   local expanded_section = 1
-
-  local win = window.create(term.current(), 1, 1, term.getSize())
-  local width, height = win.getSize()
 
   local periphs_with_nicknames = {}             -- predeclare so section_info can access it.
   local destination_periphs_with_nicknames = {} -- predeclare so section_info can access it.
@@ -753,10 +820,15 @@ local function _connections_edit_impl(connection_data)
     end
 
     -- Begin drawing
-    PrimeUI.clear()
+    clear()
 
     -- Draw info box.
-    info_box(win, "Add Connection", connection_limited and section_info.connection_limited_info or section_info.info, 3)
+    info_box(
+      main_win,
+      "Add Connection",
+      connection_limited and section_info.connection_limited_info or section_info.info,
+      3
+    )
 
     local y = 8
 
@@ -780,7 +852,13 @@ local function _connections_edit_impl(connection_data)
 
         if object == "input_box" then
           -- Input box
-          input_box_buffer = outlined_input_box(win, 3, y, width - 4, args.action, colors.white, colors.black, nil, nil, nil, args.default)
+          input_box_buffer = outlined_input_box(
+            main_win, 3, y, width - 4,
+            args.action,
+            colors.white, colors.black,
+            nil, nil, nil,
+            args.default
+          )
         elseif object == "selection_box" then
           -- Selection box
 
@@ -788,18 +866,47 @@ local function _connections_edit_impl(connection_data)
             args.items = { "No peripherals" }
           end
 
-          outlined_selection_box(win, 3, y, width - 4, section.size, args.items, args.action, nil, section.disable_when_limited and connection_limited and colors.red or colors.white,
-            colors.black, args.selection or 1, args.scroll or 1, section.disable_when_limited and connection_limited)
+          outlined_selection_box(
+            main_win,
+            3,
+            y,
+            width - 4,
+            section.size,
+            args.items,
+            args.action,
+            nil,
+            section.disable_when_limited and connection_limited and colors.red or colors.white,
+            colors.black,
+            args.selection or 1,
+            args.scroll or 1,
+            section.disable_when_limited and connection_limited
+          )
         else
           error("Invalid object type '" .. tostring(object) .. "' at index " .. i)
         end
 
         -- Draw the text box
-        PrimeUI.textBox(win, 3, y - 1, #text, 1, text, section.disable_when_limited and connection_limited and colors.orange or color, colors.black)
+        PrimeUI.textBox(
+          main_win,
+          3,
+          y - 1,
+          #text,
+          1,
+          text,
+          section.disable_when_limited and connection_limited and colors.orange or color,
+          colors.black
+        )
       else
         -- Draw the border box and text box
-        PrimeUI.borderBox(win, 3, y, width - 4, -1, color, colors.black)
-        PrimeUI.textBox(win, 3, y - 1, #text, 1, text, color, colors.black)
+        PrimeUI.borderBox(
+          main_win, 3, y, width - 4, -1,
+          color, colors.black
+        )
+        PrimeUI.textBox(
+          main_win, 3, y - 1, #text, 1,
+          text,
+          color, colors.black
+        )
       end
 
       y = y + (expanded and section.size + 2 or 1)
@@ -809,6 +916,7 @@ local function _connections_edit_impl(connection_data)
     -- shift+tab: go back a section, saving any relevant data.
     PrimeUI.keyAction(keys.tab, "section_switch")
 
+    main_win.setVisible(true)
     local object, event, result, selection, scroll_result = PrimeUI.run()
 
     if object == "keyAction" then
@@ -839,7 +947,9 @@ local function _connections_edit_impl(connection_data)
             end
 
             ---@diagnostic disable-next-line: param-type-mismatch we check this case directly above.
-            section_info[section_info.save_buffer] = section_info[section_info.save_buffer]:gsub(" ?%-.+", "") .. " - " .. _connection_data[section_info.save_buffer]
+            section_info[section_info.save_buffer] = section_info[section_info.save_buffer]:gsub(" ?%-.+", "")
+              .. " - "
+              .. _connection_data[section_info.save_buffer]
           end
 
           expanded_section = expanded_section + 1
@@ -887,7 +997,10 @@ local function _connections_edit_impl(connection_data)
         section_info.args.scroll = scroll_result
 
         if connection_limited and #_connection_data.to >= 1 then
-          unacceptable("input", "This connection is connection limited, and can only have one destination.\nIf you need more destinations, create a buffer chest connection.")
+          unacceptable(
+            "input",
+            "This connection is connection limited, and can only have one destination.\nIf you need more destinations, create a buffer chest connection."
+          )
         else
           if not found then
             table.insert(_connection_data.to, cached_peripheral_list[selection])
@@ -944,16 +1057,13 @@ end
 ---@param body string The body of the menu.
 ---@return Connection? connection The connection selected, or nil if none was selected.
 local function select_connection(title, body)
-  local win = window.create(term.current(), 1, 1, term.getSize())
-  local width, height = win.getSize()
-
   log.debug("Select a connection")
 
   while true do
-    PrimeUI.clear()
+    clear()
 
     -- Draw info box.
-    info_box(win, title, body, 2)
+    info_box(main_win, title, body, 2)
 
     local connection_list = {}
     for i, v in ipairs(connections) do
@@ -965,19 +1075,20 @@ local function select_connection(title, body)
     end
 
     outlined_selection_box(
-      win, 3, 7, width - 4, 12,
+      main_win, 3, 7, width - 4, 12,
       connection_list, "edit", nil,
       colors.white, colors.black,
       1, 1
     )
     PrimeUI.textBox(
-      win, 3, 6, 13, 1,
+      main_win, 3, 6, 13, 1,
       " Connections ",
       colors.purple
     )
 
     PrimeUI.keyAction(keys.backspace, "exit")
 
+    main_win.setVisible(true)
     local object, event, selected, selection = PrimeUI.run()
 
     if object == "selectionBox" then
@@ -1025,7 +1136,11 @@ local function connections_remove_menu()
     "Press enter to remove a connection.\nPress backspace to exit."
   )
 
-  if connection and confirmation_menu("Remove Connection", "Are you sure you want to remove connection " .. tostring(connection.name) .. "?") then
+  -- Code cleanup: Declare these as variables to reduce line length of the if statement.
+  local title = "Remove Connection"
+  local body = "Are you sure you want to remove connection " .. tostring(connection and connection.name) .. "?"
+
+  if connection and confirmation_menu(title, body) then
     for i, v in ipairs(connections) do
       if v == connection then
         table.remove(connections, i)
@@ -1038,9 +1153,6 @@ end
 local function toggle_connections_menu()
   log.debug("Toggle connections")
 
-  local win = window.create(term.current(), 1, 1, term.getSize())
-  local width, height = win.getSize()
-
   local connection_names = {}
 
   local selection, scroll = 1, 1
@@ -1050,11 +1162,11 @@ local function toggle_connections_menu()
       connection_names[i] = v.moving and " on - " .. v.name or "off - " .. v.name
     end
 
-    PrimeUI.clear()
+    clear()
 
     -- Draw info box.
     info_box(
-      win,
+      main_win,
       "Toggle Connections",
       "Press enter to toggle the moving state of all connections.\nPress backspace to exit.",
       2
@@ -1065,7 +1177,7 @@ local function toggle_connections_menu()
 
     -- Draw the selection box.
     outlined_selection_box(
-      win, 3, 6, width - 4, 5,
+      main_win, 3, 6, width - 4, 5,
       {
         toggle_on,
         toggle_off,
@@ -1078,6 +1190,7 @@ local function toggle_connections_menu()
 
     PrimeUI.keyAction(keys.backspace, "exit")
 
+    main_win.setVisible(true)
     local object, event, selected, _selection, _scroll = PrimeUI.run()
 
     if object == "selectionBox" then
@@ -1125,14 +1238,16 @@ local function connections_main_menu()
   ]]
   log.debug("Connections menu")
 
-  local win = window.create(term.current(), 1, 1, term.getSize())
-  local width, height = win.getSize()
-
   while true do
-    PrimeUI.clear()
+    clear()
 
     -- Draw info box.
-    info_box(win, "Connections", ("Total Connections: %d"):format(#connections), 1)
+    info_box(
+      main_win,
+      "Connections",
+      ("Total Connections: %d"):format(#connections),
+      1
+    )
 
     local add_connection = "Add Connection"
     local edit_connection = "Edit Connection"
@@ -1142,17 +1257,23 @@ local function connections_main_menu()
     local go_back = "Go Back"
 
     -- Draw the selection box.
-    outlined_selection_box(win, 3, 6, width - 4, 6, {
-      add_connection,
-      edit_connection,
-      filter_connection,
-      toggle_connections,
-      remove_connection,
-      go_back
-    }, "selection", nil, colors.white, colors.black, 1, 1)
+    outlined_selection_box(
+      main_win, 3, 6, width - 4, 6,
+      {
+        add_connection,
+        edit_connection,
+        filter_connection,
+        toggle_connections,
+        remove_connection,
+        go_back
+      }, "selection", nil,
+      colors.white, colors.black,
+      1, 1
+    )
 
     PrimeUI.keyAction(keys.backspace, "exit")
 
+    main_win.setVisible(true)
     local object, event, selected = PrimeUI.run()
 
     if object == "selectionBox" then
@@ -1193,25 +1314,41 @@ local function tickrate_menu()
   ]]
   log.debug("Update tickrate menu")
 
-  local win = window.create(term.current(), 1, 1, term.getSize())
-  local width, height = win.getSize()
-
-  PrimeUI.clear()
+  clear()
 
   -- Draw info box.
-  info_box(win, "Update Rate", "Press enter to accept the new update rate and exit.", 2)
+  info_box(
+    main_win,
+    "Update Rate",
+    "Press enter to accept the new update rate and exit.",
+    2
+  )
 
   -- Draw the input box.
   -- First the text around the input box.
-  PrimeUI.textBox(win, 3, 8, width - 4, 1, "Updates every [        ] ticks.", colors.white)
+  PrimeUI.textBox(
+    main_win, 3, 8, width - 4, 1,
+    "Updates every [        ] ticks.",
+    colors.white
+  )
 
   -- And the outline
-  PrimeUI.borderBox(win, 3, 8, width - 4, 1, colors.white, colors.black)
+  PrimeUI.borderBox(
+    main_win, 3, 8, width - 4, 1,
+    colors.white, colors.black
+  )
 
   -- Then the input box itself.
   local tickrate = tostring(update_tickrate)
-  PrimeUI.inputBox(win, 18, 8, 8, "tickrate", colors.white, colors.black, nil, nil, nil, tickrate)
+  PrimeUI.inputBox(
+    main_win, 18, 8, 8,
+    "tickrate",
+    colors.white, colors.black,
+    nil, nil, nil,
+    tickrate
+  )
 
+  main_win.setVisible(true)
   local object, event, output = PrimeUI.run()
 
   if object == "inputBox" then
@@ -1252,18 +1389,16 @@ local function nickname_menu()
   local run = true
   local index = 1
   local scroll = 1
-  local win = window.create(term.current(), 1, 1, term.getSize())
-  local width, height = win.getSize()
   local editing = false
 
   local cached_peripheral_list = get_peripherals()
 
   while run do
-    PrimeUI.clear()
+    clear()
 
     -- Draw info box.
     local info = "Press enter to edit a nickname.\nPress backspace to exit (while not editing)."
-    info_box(win, "Nicknames", info, 2)
+    info_box(main_win, "Nicknames", info, 2)
 
     cached_peripheral_list = editing and cached_peripheral_list or get_peripherals()
     if #cached_peripheral_list == 0 then
@@ -1271,7 +1406,7 @@ local function nickname_menu()
     end
 
     outlined_selection_box(
-      win,
+      main_win,
       3, 7,
       width - 4, 9,
       cached_peripheral_list,
@@ -1280,10 +1415,14 @@ local function nickname_menu()
       index, scroll,
       editing
     )
-    PrimeUI.textBox(win, 3, 6, 13, 1, " Peripherals ", editing and colors.gray or colors.purple)
+    PrimeUI.textBox(
+      main_win, 3, 6, 13, 1,
+      " Peripherals ",
+      editing and colors.gray or colors.purple
+    )
 
     outlined_input_box(
-      win,
+      main_win,
       3, height - 1,
       width - 4,
       "text_box",
@@ -1293,7 +1432,11 @@ local function nickname_menu()
       not editing
     )
     local x, y = term.getCursorPos()
-    PrimeUI.textBox(win, 3, height - 2, 10, 1, " Nickname ", editing and colors.purple or colors.gray)
+    PrimeUI.textBox(
+      main_win, 3, height - 2, 10, 1,
+      " Nickname ",
+      editing and colors.purple or colors.gray
+    )
 
     if not editing then
       -- Backspace key: exits the menu
@@ -1306,6 +1449,7 @@ local function nickname_menu()
     term.setCursorBlink(editing)
 
     -- Run the UI
+    main_win.setVisible(true)
     local object, event, selected, _selection, _scroll = PrimeUI.run()
 
     if object == "keyAction" then
@@ -1345,15 +1489,10 @@ end
 local function log_menu()
   log.info("Hello there!")
 
-  PrimeUI.clear()
-
-  local win = window.create(term.current(), 1, 1, term.getSize())
-  local width, height = win.getSize()
-
   local function draw_main()
     -- Draw the info box.
     info_box(
-      win,
+      main_win,
       "Log",
       "Press enter to dump log to a file.\nPress c to clear warns/errors.\nPress backspace to exit.",
       3
@@ -1361,7 +1500,7 @@ local function log_menu()
 
     -- Draw a box around where the log will be displayed.
     PrimeUI.borderBox(
-      win,
+      main_win,
       3,
       8,
       width - 4,
@@ -1376,13 +1515,14 @@ local function log_menu()
   end
 
   while true do
-    PrimeUI.clear()
+    clear()
     draw_main()
 
     PrimeUI.keyAction(keys.backspace, "exit")
     PrimeUI.keyAction(keys.enter, "dump")
     PrimeUI.keyAction(keys.c, "clear")
 
+    main_win.setVisible(true)
     local object, event = PrimeUI.run()
 
     if object == "keyAction" then
@@ -1392,13 +1532,24 @@ local function log_menu()
       elseif event == "dump" then
         log.info("Getting output file...")
 
-        PrimeUI.clear()
+        clear()
 
         draw_main()
 
-        outlined_input_box(win, 4, 4, width - 6, "output", colors.white, colors.black, nil, nil, nil, "log.txt")
-        PrimeUI.textBox(win, 4, 3, 10, 1, " Filename ", colors.purple)
+        outlined_input_box(
+          main_win, 4, 4, width - 6,
+          "output",
+          colors.white, colors.black,
+          nil, nil, nil,
+          "log.txt"
+        )
+        PrimeUI.textBox(
+          main_win, 4, 3, 10, 1,
+          " Filename ",
+          colors.purple
+        )
 
+        main_win.setVisible(true)
         local object, event, output = PrimeUI.run()
 
         if object == "inputBox" and event == "output" then
@@ -1447,23 +1598,25 @@ local function main_menu()
           moving_items and "Yes" or "No"
         )
 
-    local win = window.create(term.current(), 1, 1, term.getSize())
-    local width, height = win.getSize()
-
-    PrimeUI.clear()
+    clear()
 
     -- Create the information box.
-    info_box(win, "Main Menu", description, 8)
+    info_box(main_win, "Main Menu", description, 8)
 
     -- Create the selection box.
-    outlined_selection_box(win, 4, 13, width - 6, height - 13, {
-      update_connections,
-      update_rate,
-      nickname,
-      toggle,
-      view_log,
-      exit
-    }, "selection", "selection-change", colors.white, colors.black, selection, scroll)
+    outlined_selection_box(
+      main_win, 4, 13, width - 6, height - 13,
+      {
+        update_connections,
+        update_rate,
+        nickname,
+        toggle,
+        view_log,
+        exit
+      }, "selection", "selection-change",
+      colors.white, colors.black,
+      selection, scroll
+    )
 
     PrimeUI.addTask(function()
       repeat
@@ -1476,17 +1629,17 @@ local function main_menu()
     if logging.has_errored() or logging.has_warned() then
       if blinky then
         local color = logging.has_errored() and colors.red or colors.orange
-        win.setBackgroundColor(color)
+        main_win.setBackgroundColor(color)
 
-        win.setCursorPos(4, height - 2)
-        win.write(' ')
+        main_win.setCursorPos(4, height - 2)
+        main_win.write(' ')
 
-        win.setCursorPos(width - 3, height - 2)
-        win.write(' ')
+        main_win.setCursorPos(width - 3, height - 2)
+        main_win.write(' ')
       end
     end
 
-
+    main_win.setVisible(true)
     local object, event, selected, _selection, _scroll = PrimeUI.run()
     log.debug("Selected", selected)
 
