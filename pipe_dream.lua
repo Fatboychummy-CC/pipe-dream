@@ -239,6 +239,10 @@ local function key_listener()
   end
 end
 
+local function shift_held()
+  return keys_held[keys.leftShift] or keys_held[keys.rightShift]
+end
+
 --- Verify a connection.
 ---@param connection_data Connection The connection data to verify.
 ---@return boolean valid Whether the connection is valid.
@@ -297,7 +301,7 @@ local function confirmation_menu(title, body, select_yes_default)
       select_yes_default and 1 or 2, 1
     )
 
-    PrimeUI.keyAction(keys.backspace, "exit")
+    PrimeUI.keyAction(keys.tab, "exit")
 
     main_win.setVisible(true)
     local object, event, result = PrimeUI.run()
@@ -306,7 +310,7 @@ local function confirmation_menu(title, body, select_yes_default)
       if event == "selection" then
         return result == "Yes"
       end
-    elseif object == "keyAction" and event == "exit" then
+    elseif object == "keyAction" and event == "exit" and shift_held() then
       return false
     end
   end
@@ -401,7 +405,7 @@ local function _connections_filter_edit_impl(connection_data)
       info_box(
         main_win,
         "View items",
-        "Press backspace to go back.",
+        "Press shift+tab to go back.",
         1
       )
       items_y = 6
@@ -469,10 +473,9 @@ local function _connections_filter_edit_impl(connection_data)
         no_items_toggle = not no_items_toggle
         PrimeUI.resolve("scroller")
       end)
-
-      -- Read needs backspace, so we only activate it if not in add mode.
-      PrimeUI.keyAction(keys.backspace, "exit")
     end
+
+    PrimeUI.keyAction(keys.tab, "exit")
 
     main_win.setVisible(true)
     local object, event, result, selection, scroll_result = PrimeUI.run()
@@ -570,7 +573,7 @@ local function _connections_filter_edit_impl(connection_data)
           scroll_direction = next_scroll_direction
         end
       end
-    elseif object == "keyAction" and event == "exit" then
+    elseif object == "keyAction" and event == "exit" and shift_held() then
       if selected then
         -- <something> was selected, so go back to the "main" section, reverting
         -- data to defaults.
@@ -1086,7 +1089,7 @@ local function select_connection(title, body)
       colors.purple
     )
 
-    PrimeUI.keyAction(keys.backspace, "exit")
+    PrimeUI.keyAction(keys.tab, "exit")
 
     main_win.setVisible(true)
     local object, event, selected, selection = PrimeUI.run()
@@ -1096,7 +1099,7 @@ local function select_connection(title, body)
         log.debug("Selected connection", selection, "(", selected, ")")
         return connections[selection]
       end
-    elseif object == "keyAction" and event == "exit" then
+    elseif object == "keyAction" and event == "exit" and shift_held() then
       log.debug("Exit connection selection.")
       return
     end
@@ -1108,7 +1111,7 @@ local function connections_edit_menu()
   log.debug("Edit connection")
   local connection = select_connection(
     "Edit Connection",
-    "Press enter to edit a connection.\nPress backspace to exit."
+    "Press enter to edit a connection.\nPress shift+tab to exit."
   )
 
   if connection then
@@ -1121,7 +1124,7 @@ local function connections_filter_menu()
   log.debug("Edit connection filter")
   local connection = select_connection(
     "Edit Connection Filter",
-    "Press enter to edit a connection's filter.\nPress backspace to exit."
+    "Press enter to edit a connection's filter.\nPress shift+tab to exit."
   )
 
   if connection then
@@ -1133,7 +1136,7 @@ local function connections_remove_menu()
   log.debug("Remove connection")
   local connection = select_connection(
     "Remove Connection",
-    "Press enter to remove a connection.\nPress backspace to exit."
+    "Press enter to remove a connection.\nPress shift+tab to exit."
   )
 
   -- Code cleanup: Declare these as variables to reduce line length of the if statement.
@@ -1168,7 +1171,7 @@ local function toggle_connections_menu()
     info_box(
       main_win,
       "Toggle Connections",
-      "Press enter to toggle the moving state of all connections.\nPress backspace to exit.",
+      "Press enter to toggle the moving state of all connections.\nPress shift+tab to exit.",
       2
     )
 
@@ -1188,7 +1191,7 @@ local function toggle_connections_menu()
       selection, scroll
     )
 
-    PrimeUI.keyAction(keys.backspace, "exit")
+    PrimeUI.keyAction(keys.tab, "exit")
 
     main_win.setVisible(true)
     local object, event, selected, _selection, _scroll = PrimeUI.run()
@@ -1213,7 +1216,7 @@ local function toggle_connections_menu()
       selection = _selection
       scroll = _scroll
       save()
-    elseif object == "keyAction" and event == "exit" then
+    elseif object == "keyAction" and event == "exit" and shift_held() then
       save()
       log.debug("Exiting toggle connections menu.")
       return
@@ -1233,7 +1236,7 @@ local function connections_main_menu()
     # > Add Connection                                   #
     #   Edit Connection                                  #
     #   Remove Connection                                #
-    #   Go Back                                          # -- backspace will also work
+    #   Go Back                                          # -- shift+tab will also work
     ######################################################
   ]]
   log.debug("Connections menu")
@@ -1271,7 +1274,7 @@ local function connections_main_menu()
       1, 1
     )
 
-    PrimeUI.keyAction(keys.backspace, "exit")
+    PrimeUI.keyAction(keys.tab, "exit")
 
     main_win.setVisible(true)
     local object, event, selected = PrimeUI.run()
@@ -1294,7 +1297,7 @@ local function connections_main_menu()
       end
 
       save()
-    elseif object == "keyAction" and event == "exit" then
+    elseif object == "keyAction" and event == "exit" and shift_held() then
       save()
       log.debug("Exiting connections menu.")
       return
@@ -1320,8 +1323,8 @@ local function tickrate_menu()
   info_box(
     main_win,
     "Update Rate",
-    "Press enter to accept the new update rate and exit.",
-    2
+    "Press enter to accept the new update rate and exit.\nPress shift+tab to exit without saving.",
+    3
   )
 
   -- Draw the input box.
@@ -1348,6 +1351,8 @@ local function tickrate_menu()
     tickrate
   )
 
+  PrimeUI.keyAction(keys.tab, "exit")
+
   main_win.setVisible(true)
   local object, event, output = PrimeUI.run()
 
@@ -1363,6 +1368,9 @@ local function tickrate_menu()
         log.debug("Set update tickrate to", update_tickrate)
       end
     end
+  elseif object == "keyAction" and event == "exit" and shift_held() then
+    log.debug("Exiting tickrate menu (discard).")
+    return
   end
 end
 
@@ -1372,7 +1380,7 @@ local function nickname_menu()
     ######################################################
     # Nicknames                                          #
     # Press enter to edit a nickname.                    #
-    # Press backspace to exit.                           #
+    # Press shift+tab to exit.                           #
     ######################################################
     ######################################################
     # > peripheral_1                                     #
@@ -1397,7 +1405,7 @@ local function nickname_menu()
     clear()
 
     -- Draw info box.
-    local info = "Press enter to edit a nickname.\nPress backspace to exit (while not editing)."
+    local info = "Press enter to edit a nickname.\nPress shift+tab to exit."
     info_box(main_win, "Nicknames", info, 2)
 
     cached_peripheral_list = editing and cached_peripheral_list or get_peripherals()
@@ -1438,10 +1446,7 @@ local function nickname_menu()
       editing and colors.purple or colors.gray
     )
 
-    if not editing then
-      -- Backspace key: exits the menu
-      PrimeUI.keyAction(keys.backspace, "exit")
-    end
+    PrimeUI.keyAction(keys.tab, "exit")
 
     -- Reset the cursor position to be in the input box, and ensure it is visible if it needs to be.
     term.setCursorPos(x, y)
@@ -1453,9 +1458,14 @@ local function nickname_menu()
     local object, event, selected, _selection, _scroll = PrimeUI.run()
 
     if object == "keyAction" then
-      if event == "exit" then
-        run = false
-        log.debug("Exiting nickname menu.")
+      if event == "exit" and shift_held() then
+        if editing then
+          log.debug("Exiting nickname edit (discard).")
+          editing = false
+        else
+          log.debug("Exiting nickname menu.")
+          run = false
+        end
       end
     elseif object == "selectionBox" then
       if event == "edit" then
@@ -1494,7 +1504,7 @@ local function log_menu()
     info_box(
       main_win,
       "Log",
-      "Press enter to dump log to a file.\nPress c to clear warns/errors.\nPress backspace to exit.",
+      "Press enter to dump log to a file.\nPress c to clear warns/errors.\nPress shift+tab to exit.",
       3
     )
 
@@ -1518,7 +1528,7 @@ local function log_menu()
     clear()
     draw_main()
 
-    PrimeUI.keyAction(keys.backspace, "exit")
+    PrimeUI.keyAction(keys.tab, "exit")
     PrimeUI.keyAction(keys.enter, "dump")
     PrimeUI.keyAction(keys.c, "clear")
 
@@ -1526,7 +1536,7 @@ local function log_menu()
     local object, event = PrimeUI.run()
 
     if object == "keyAction" then
-      if event == "exit" then
+      if event == "exit" and shift_held() then
         log.info("Exiting log menu.")
         break
       elseif event == "dump" then
