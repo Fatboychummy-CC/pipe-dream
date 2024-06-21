@@ -11,7 +11,7 @@ local main_win = window.create(term.current(), 1, 1, term.getSize())
 local width, height = term.getSize()
 
 
-logging_win = window.create(term.current(), 3, 8, width - 4, height - 8)
+logging_win = window.create(term.current(), 3, 8, width - 4, height - 7)
 logging_win.setVisible(false)
 main_win.setVisible(false)
 logging.set_window(logging_win)
@@ -1518,10 +1518,20 @@ local function log_menu()
       logging.has_errored() and colors.red or logging.has_warned() and colors.orange or colors.white,
       colors.black
     )
+  end
 
+  local function draw_log()
     -- Draw the log window
     logging_win.setVisible(true)
     logging_win.redraw() -- ensure it actually redraws.
+
+    -- Ensure the bottom of box is drawn, since we make the log window 1 line taller
+    -- than is needed (print leaves a blank line at the end of the log, that we don't
+    -- want).
+    main_win.setCursorPos(3, height)
+    main_win.setBackgroundColor(colors.black)
+    main_win.setTextColor(colors.white)
+    main_win.write(("\x8c"):rep(width - 4))
   end
 
   while true do
@@ -1533,6 +1543,7 @@ local function log_menu()
     PrimeUI.keyAction(keys.c, "clear")
 
     main_win.setVisible(true)
+    draw_log()
     local object, event = PrimeUI.run()
 
     if object == "keyAction" then
@@ -1560,6 +1571,7 @@ local function log_menu()
         )
 
         main_win.setVisible(true)
+        draw_log()
         local object, event, output = PrimeUI.run()
 
         if object == "inputBox" and event == "output" then
