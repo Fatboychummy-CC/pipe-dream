@@ -714,7 +714,7 @@ local function _connections_edit_impl(connection_data)
     filter_list = {},
     filter_mode = "blacklist",
     mode = "1234",
-    moving = false, -- New connections will be disabled by default
+    moving = true, -- New connections are enabled by default.
     id = os.epoch("utc")
   }
   local editing_con = false
