@@ -223,6 +223,7 @@ local function unacceptable(_type, reason)
   end
 
   PrimeUI.keyAction(keys.enter, "exit")
+  PrimeUI.keyAction(keys.tab, "exit")
 
   main_win.setVisible(true)
   PrimeUI.run()
@@ -379,12 +380,62 @@ local function _connections_filter_edit_impl(connection_data)
     "Remove item",
     "Toggle blacklist/whitelist"
 
-  local timer = os.startTimer(0.5)
-
   local no_items_toggle = true
 
+  local timer_timeout = 0.5
+  local timer
+
+  --- Start a new timer.
+  local function new_timer()
+    timer = os.startTimer(timer_timeout)
+  end
+
+  --- Insert an item into the filter list.
+  ---@param item string The item name to insert.
+  local function insert_item(item)
+    if not item or item == "" then
+      log.debug("Add empty item, ignored.")
+      return
+    end
+
+    table.insert(items, item)
+    item_count = item_count + 1
+
+    log.debug("Added item", item, "to filter list for connection", connection_data.name)
+
+    table.sort(items)
+  end
+
+  --- Ask the user if they really want to remove the given item, and then remove it if they do.
+  ---@param selection integer The index of the item to remove.
+  local function really_remove(selection)
+    -- Code cleanup: Declare the title and body outside of the if statement to reduce its size.
+    local title = "Remove item"
+    local body = "Are you sure you want to remove item " .. tostring(items[selection]) .. " from the filter list?"
+
+    if items[selection] and confirmation_menu(title, body) then
+      log.debug("Remove item", items[selection], "from filter list for connection", connection_data.name)
+
+      table.remove(items, selection)
+      item_count = item_count - 1
+
+      -- Offset the selected item, since we just removed one.
+      item_selected = item_selected - 1
+      if item_selected < 1 then
+        item_selected = 1
+      end
+      if item_selected < item_scroll then
+        item_scroll = item_selected
+      end
+    end
+  end
+
+  new_timer()
   while true do
     clear()
+
+    ---@type string[] The buffer for the input box.
+    local buffer = {}
 
     -- If we've selected something, we can draw the info box for it.
     if selected == "add" then
@@ -394,7 +445,7 @@ local function _connections_filter_edit_impl(connection_data)
         "Enter the name of the item to add to the filter list, then press enter to confirm.",
         2
       )
-      outlined_input_box(
+      buffer = outlined_input_box(
         main_win, 3, 7, width - 4,
         "add-item",
         colors.white, colors.black
@@ -522,36 +573,19 @@ local function _connections_filter_edit_impl(connection_data)
         end
       elseif event == "select-item" then
         if selected == "remove" then
-          -- Code cleanup: Declare the title and body outside of the if statement to reduce its size.
-          local title = "Remove item"
-          local body = "Are you sure you want to remove item " .. tostring(items[selection]) .. " from the filter list?"
+          really_remove(selection)
 
-          if items[selection] and confirmation_menu(title, body) then
-            log.debug("Remove item", items[selection], "from filter list for connection", connection_data.name)
-
-            table.remove(items, selection)
-            item_count = item_count - 1
-
-            -- Offset the selected item, since we just removed one.
-            item_selected = item_selected - 1
-            if item_selected < 1 then
-              item_selected = 1
-            end
-            if item_selected < item_scroll then
-              item_scroll = item_selected
-            end
-          end
           -- Exit the selection mode
           selected = nil
           reset_scroller()
 
           -- Restart the timer, since we did something that may take longer than 0.5 secs
-          timer = os.startTimer(0.5)
+          new_timer()
         end
       end
     elseif object == "scroller" then
       -- scroll the preview box
-      timer = os.startTimer(0.5)
+      new_timer()
 
       if not enable_selector and item_count > items_height then
 
@@ -575,33 +609,66 @@ local function _connections_filter_edit_impl(connection_data)
           scroll_direction = next_scroll_direction
         end
       end
-    elseif object == "keyAction" and event == "exit" and shift_held() then
-      if selected then
-        -- <something> was selected, so go back to the "main" section, reverting
-        -- data to defaults.
-        selected = nil
-        reset_scroller()
+    elseif object == "keyAction" and event == "exit" then
+      if shift_held() then
+        if selected then
+          -- Something was selected, so go back to the "main" section, reverting
+          -- data to defaults.
+          selected = nil
+          reset_scroller()
+        else
+          save()
+          return
+        end
       else
-        save()
-        return
+        if selected then
+          if selected == "add" then
+            insert_item(table.concat(buffer))
+          elseif selected == "remove" then
+            really_remove(item_selected)
+
+            -- Exit the selection mode
+            selected = nil
+            reset_scroller()
+          end -- "view" doesn't need anything done here.
+
+          -- Restart the timer, since we did something that may take longer than 0.5 secs
+          new_timer()
+        else
+          ---@fixme
+          -- I don't like this. If we change the order of these selections in
+          -- the future, we have to change this code too.
+          -- Can we un-hardcode the 1/2/3/4 here?
+
+          -- Select the item
+          if main_selected == 1 then
+            selected = "add"
+            log.debug("Selected add item")
+          elseif main_selected == 2 then
+            selected = "view"
+            item_selected = 1
+            item_scroll = 1
+            log.debug("Selected view items")
+          elseif main_selected == 3 then
+            selected = "remove"
+            item_selected = 1
+            item_scroll = 1
+            log.debug("Selected remove item")
+          elseif main_selected == 4 then
+            connection_data.filter_mode = connection_data.filter_mode == "whitelist" and "blacklist" or "whitelist"
+            log.debug("Toggled filter mode to", connection_data.filter_mode)
+          end
+        end
       end
     elseif object == "inputBox" then
       if event == "add-item" then
-        if result and result ~= "" then
-          table.insert(items, result)
-          item_count = item_count + 1
-          log.debug("Added item", result, "to filter list for connection", connection_data.name)
-
-          table.sort(items)
-        elseif result == "" then
-          log.debug("Add empty item, ignored.")
-        end
+        insert_item(result)
 
         selected = nil
         reset_scroller()
 
         -- Restart the timer, since we did something that may take longer than 0.5 secs
-        timer = os.startTimer(0.5)
+        new_timer()
       end
     end
   end
@@ -2126,7 +2193,7 @@ local function _run_connection_from_origin(connection)
 
                 -- Update the amount of fluid moved to this inventory.
                 -- Same reasoning as above.
-                moved_inventories[output_inventory][fluid.name] = moved_inventories[output_inventory] [fluid.name]
+                moved_inventories[output_inventory][fluid.name] = moved_inventories[output_inventory][fluid.name]
                   + to_move
                 backend_log.debug(
                   "Remains:", item_counts[fluid.name] - moved_inventories[output_inventory][fluid.name],
@@ -2225,6 +2292,17 @@ local function _run_connection_impl(connection)
     return
   end
 
+  -- Alternatively, fluid:
+  if peripheral.hasType(from, "fluid_storage") then
+    _run_connection_from_origin(connection)
+    return
+  end
+
+  if peripheral.hasType(to[1], "fluid_storage") then
+    _run_connection_to_inventory(connection)
+    return
+  end
+
   -- If we made it here, neither the origin or all destinations are inventories.
   -- Thus, fail.
 
@@ -2233,7 +2311,8 @@ local function _run_connection_impl(connection)
     return
   end
 
-  if not peripheral.isPresent(from) and not peripheral.hasType(to[1], "inventory") then
+  if not peripheral.isPresent(from) and not peripheral.hasType(to[1], "inventory")
+    and not peripheral.hasType(to[1], "fluid_storage") then
     backend_log.error("Connection", connection.name, "could not be run: origin peripheral is missing.")
   end
 
